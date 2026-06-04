@@ -1,5 +1,5 @@
 ---
-title: "Language Bindings for livesplit-core"
+title: "livesplit-core Language Bindings: C, Java, Swift, More"
 sidebarTitle: "Overview"
 description: "livesplit-core auto-generates native language bindings from its C API for C, C#, Java, Kotlin, Swift, JavaScript, TypeScript, Ruby, and Python."
 ---
@@ -35,7 +35,7 @@ Every binding follows the same shape:
 - **Owned objects must be explicitly freed.** Each owned class exposes a `drop` / `Dispose` /
   `[Symbol.dispose]` method (language-specific). Forgetting to call it leaks native memory.
 - **Static constructors** map to language-level constructors or factory methods (e.g. `Run_new`
-  → `new Run()` in Java, `Run.New()` in C#, `Run_new()` in C).
+  → `new Run()` in Java, `new Run()` in C#, `Run_new()` in C).
 
 ## How to obtain bindings
 

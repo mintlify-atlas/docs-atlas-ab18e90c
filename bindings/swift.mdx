@@ -1,5 +1,5 @@
 ---
-title: "Using livesplit-core from Swift"
+title: "livesplit-core Swift Bindings: C Interop for iOS, macOS"
 sidebarTitle: "Swift"
 description: "Embed livesplit-core in iOS or macOS Swift apps using the auto-generated Swift bindings and a module map for seamless C library interop."
 ---
@@ -109,8 +109,8 @@ run.setCategoryName("Any%")
 // Segment_new is non-nullable → constructor
 run.pushSegment(Segment("Prologue"))
 
-// Timer_new returns a nullable pointer → factory method returns Timer?
-guard let timer = Timer.new(run) else {
+// Timer_new returns a nullable pointer → init?() returns Timer?
+guard let timer = Timer(run) else {
     fatalError("Run must have at least one segment")
 }
 
@@ -131,5 +131,5 @@ timer.dispose()
   deallocated (e.g. in a tight loop).
 - `TimerRef` and `TimerRefMut` are non-owning references — never call `dispose()` on them
   directly.
-- After passing an owned object to a consuming function (e.g. `Timer.new(run)`), the binding
+- After passing an owned object to a consuming function (e.g. `Timer(run)`), the binding
   zeroes `run.ptr` so further calls on `run` throw instead of corrupting memory.

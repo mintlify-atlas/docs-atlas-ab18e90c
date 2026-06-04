@@ -43,14 +43,14 @@ let state = layout.state(&timer.snapshot(), &mut image_cache);
 // Allocate a pixel buffer: width × height × 4 bytes (RGBA8).
 let width: u32 = 300;
 let height: u32 = 500;
-let stride = width * 4; // bytes per row (matches width when no padding)
-let mut buffer = vec![0u8; (height * stride) as usize];
+let stride = width; // pixels per row (no over-allocation padding)
+let mut buffer = vec![0u8; (height * stride * 4) as usize];
 
 // Create the renderer (reuse across frames — it caches scene state).
 let mut renderer = BorrowedRenderer::new();
 
 // Render into the buffer.
-// Returns Some([new_width, new_height]) if the layout changed size — a hint only.
+// Returns Some([new_width, new_height]: [f32; 2]) if the ideal layout size changed — a hint only.
 renderer.render(
     &state,
     &image_cache,

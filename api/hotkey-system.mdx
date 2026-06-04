@@ -87,9 +87,9 @@ config.toggle_timing_method = Some(Hotkey::from(KeyCode::F9));
 system.set_config(config).unwrap();
 ```
 
-### `resolve(key_code: KeyCode) -> Option<String>`
+### `resolve(key_code: KeyCode) -> Cow<'static, str>`
 
-Resolves a `KeyCode` to its localized name according to the current keyboard layout. Useful for displaying hotkey labels to the user in the correct script.
+Resolves a `KeyCode` to its localized name according to the current keyboard layout. Useful for displaying hotkey labels to the user in the correct script. Returns a `Cow<'static, str>` — typically a `'static` string slice but may be an owned `String` for dynamically resolved names.
 
 ---
 

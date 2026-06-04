@@ -177,13 +177,21 @@ timer.set_custom_variable("maps_completed", "3");
   Returns `true` if the current attempt has achieved new best times in any segment or a new personal best. Use this to prompt the user whether to save before resetting.
 </ParamField>
 
-<ParamField path="save_as_lss()" type="String">
-  Serializes the current Run (including all history) as a LiveSplit LSS XML string.
-</ParamField>
-
 <ParamField path="mark_as_unmodified()">
   Marks the Run as unmodified, indicating all changes have been persisted. Useful after saving to disk.
 </ParamField>
+
+To serialize the run to a LiveSplit `.lss` file, use the standalone saver function:
+
+```rust
+use livesplit_core::run::saver::livesplit::{self, IoWrite};
+use std::{fs::File, io::BufWriter};
+
+let file = File::create("run.lss").unwrap();
+livesplit::save_run(timer.run(), IoWrite(BufWriter::new(file))).unwrap();
+// Or, to include current in-progress attempt data:
+livesplit::save_timer(&timer, IoWrite(BufWriter::new(file))).unwrap();
+```
 
 ## Events and Errors
 
@@ -199,22 +207,37 @@ Most timer control methods return `Result<Event, Error>`.
 | `Reset` | The attempt was reset. |
 | `SplitUndone` | The last split was undone. |
 | `SplitSkipped` | The current split was skipped. |
-| `Paused` / `Resumed` | The timer was paused or resumed. |
+| `Paused` | The timer was paused. |
+| `Resumed` | The timer was resumed. |
 | `PausesUndone` | All pause times were removed. |
+| `PausesUndoneAndResumed` | All pause times were removed and the timer was resumed. |
 | `ComparisonChanged` | The active comparison changed. |
-| `GameTimeSet` / `GameTimeInitialized` | Game time was updated or initialized. |
+| `TimingMethodChanged` | The active timing method changed. |
+| `GameTimeInitialized` | Game time was initialized for this attempt. |
+| `GameTimeSet` | Game time was set to a specific value. |
+| `GameTimePaused` | The game timer was paused. |
+| `GameTimeResumed` | The game timer was resumed. |
+| `LoadingTimesSet` | The loading times offset was set. |
 | `CustomVariableSet` | A custom variable was set. |
 
 **`Error` variants** — explain rejected commands:
 
 | Variant | Description |
 |---|---|
-| `RunAlreadyInProgress` | `start()` called when a run is running. |
+| `Unsupported` | The operation is not supported in this context. |
+| `Busy` | The timer cannot be interacted with at the moment. |
+| `RunAlreadyInProgress` | `start()` called when a run is already running. |
 | `NoRunInProgress` | Control called when no attempt is active. |
-| `RunFinished` | Command invalid because the run has ended. |
+| `RunFinished` | Command is invalid because the run has already ended. |
 | `NegativeTime` | Cannot split while the timer shows negative time. |
 | `CantSkipLastSplit` | The last split cannot be skipped. |
 | `CantUndoFirstSplit` | There is no previous split to undo. |
-| `AlreadyPaused` / `NotPaused` | Pause/resume called in the wrong state. |
+| `AlreadyPaused` | `pause()` called when the timer is already paused. |
+| `NotPaused` | `resume()` called when the timer is not paused. |
 | `ComparisonDoesntExist` | Named comparison not found. |
-| `GameTimeAlreadyInitialized` | `initialize_game_time()` called twice. |
+| `GameTimeAlreadyInitialized` | `initialize_game_time()` called when game time is already active. |
+| `GameTimeAlreadyPaused` | `pause_game_time()` called when game time is already paused. |
+| `GameTimeNotPaused` | `resume_game_time()` called when game time is not paused. |
+| `CouldNotParseTime` | A time string could not be parsed. |
+| `TimerPaused` | The command is invalid because the timer is paused. |
+| `RunnerDecidedAgainstReset` | The runner chose not to reset when prompted. |

@@ -23,7 +23,7 @@ The editor also tracks a **selected set of segments** and an **active segment** 
 
 Opens a `RunEditor` for the given `Run`. Automatically calls `fix_splits()` on the run before opening.
 
-**Fails** (`Err(OpenError::EmptyRun)`) if the run contains no segments, since a valid run must always have at least one segment. In that case the original `Run` is accessible via the `Err` variant... but note that in the C API / Rust API this returns `Result<Self, OpenError>` — you cannot recover the run from the error directly; add a segment first.
+**Fails** (`Err(OpenError::EmptyRun)`) if the run contains no segments, since a valid run must always have at least one segment. The `Run` is consumed by this call — if it fails, the original `Run` is **not** returned in the error; add at least one segment before calling `new`.
 
 ```rust
 use livesplit_core::{Run, Segment, run::Editor as RunEditor};

@@ -39,13 +39,16 @@ let settings: LayoutSettings = /* ... */;
 let layout = Layout::from_settings(settings);
 ```
 
-### `Layout::parse_json(settings: &str) -> Option<Layout>`
+### Parsing a Layout from JSON
 
-Parses a layout from a JSON string previously produced by `settings_as_json`. Returns `None` if the string cannot be parsed.
+There is no `Layout::parse_json` method in the Rust API. To reconstruct a layout from JSON, parse the JSON into `LayoutSettings` first and then call `Layout::from_settings`:
 
 ```rust
+use livesplit_core::layout::LayoutSettings;
+
 let json = std::fs::read_to_string("layout.json").unwrap();
-let layout = Layout::parse_json(&json).expect("Invalid layout JSON");
+let settings = LayoutSettings::from_json(json.as_bytes()).expect("Invalid layout JSON");
+let layout = Layout::from_settings(settings);
 ```
 
 ---
@@ -108,13 +111,14 @@ Accesses the general settings (background color, fonts, separator colors, direct
 
 Grants mutable access to the general settings.
 
-### `settings_as_json() -> String`
+### Serializing Layout Settings to JSON
 
-Serializes the layout settings (general + all components) to a JSON string. Use this to persist a layout to disk.
+There is no `settings_as_json()` method on `Layout` in the Rust API. To serialize a layout's settings to JSON, call `settings()` to get a `LayoutSettings` value and then use its `write_json` method:
 
 ```rust
-let json = layout.settings_as_json();
-std::fs::write("layout.json", json).unwrap();
+let mut buf = Vec::new();
+layout.settings().write_json(&mut buf).unwrap();
+std::fs::write("layout.json", buf).unwrap();
 ```
 
 ---
@@ -134,7 +138,7 @@ layout.scroll_up();
 ## Full Example
 
 ```rust
-use livesplit_core::{Layout, settings::ImageCache};
+use livesplit_core::{Layout, layout::LayoutSettings, settings::ImageCache};
 
 // Default layout with a standard set of components
 let mut layout = Layout::default_layout(Default::default());
@@ -143,16 +147,20 @@ let mut layout = Layout::default_layout(Default::default());
 let mut image_cache = ImageCache::new();
 let state = layout.state(&mut image_cache, &timer.snapshot(), Default::default());
 
-// Or serialize the layout settings to JSON for persistence
-let json = layout.settings_as_json();
-std::fs::write("layout.json", json).unwrap();
+// Serialize the layout settings to JSON for persistence
+let mut buf = Vec::new();
+layout.settings().write_json(&mut buf).unwrap();
+std::fs::write("layout.json", buf).unwrap();
 ```
 
 Loading a saved layout:
 
 ```rust
+use livesplit_core::layout::LayoutSettings;
+
 let json = std::fs::read_to_string("layout.json").unwrap();
-let layout = Layout::parse_json(&json).expect("Invalid layout JSON");
+let settings = LayoutSettings::from_json(json.as_bytes()).expect("Invalid layout JSON");
+let layout = Layout::from_settings(settings);
 ```
 
 ---
@@ -165,12 +173,12 @@ The C API mirrors the Rust API for use from languages that consume the livesplit
 |---|---|
 | `Layout_new()` | `Layout::new()` |
 | `Layout_default_layout(lang)` | `Layout::default_layout(lang)` |
-| `Layout_parse_json(settings)` | `Layout::parse_json(&str)` |
+| `Layout_parse_json(settings)` | `LayoutSettings::from_json(reader)` → `Layout::from_settings(settings)` |
 | `Layout_push(this, component)` | `layout.push(component)` |
 | `Layout_state(this, image_cache, timer, lang)` | `layout.state(...)` |
 | `Layout_update_state(this, state, image_cache, timer, lang)` | `layout.update_state(...)` |
 | `Layout_state_as_json(this, image_cache, timer, lang)` | JSON-encoded `LayoutState` |
-| `Layout_settings_as_json(this)` | `layout.settings_as_json()` |
+| `Layout_settings_as_json(this)` | `layout.settings().write_json(writer)` |
 | `Layout_scroll_up(this)` / `Layout_scroll_down(this)` | `layout.scroll_up()` / `layout.scroll_down()` |
 | `Layout_clone(this)` | `layout.clone()` |
 | `Layout_drop(this)` | `drop(layout)` |

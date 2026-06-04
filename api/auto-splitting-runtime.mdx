@@ -86,12 +86,14 @@ This behavior is transparent — you don't need to configure the watchdog manual
 
 ```rust
 pub enum Error {
-    /// The auto splitter could not be compiled or instantiated.
-    LoadFailed { source: /* wasm error */ },
-    /// The auto splitter file could not be read from disk.
-    ReadFileFailed { source: io::Error },
     /// The background runtime thread stopped unexpectedly.
     ThreadStopped,
+    /// The auto splitter could not be compiled or instantiated.
+    LoadFailed { source: CreationError },
+    /// Tried reloading the auto splitter when no auto splitter is loaded.
+    ImpossibleReload,
+    /// The auto splitter file could not be read from disk.
+    ReadFileFailed { source: io::Error },
     /// The auto splitter's settings could not be loaded.
     SettingsLoadFailed,
     /// A requested setting was not found in the settings map.

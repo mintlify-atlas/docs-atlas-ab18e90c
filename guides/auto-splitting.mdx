@@ -143,11 +143,10 @@ In addition to the `env` API, the runtime provides WASI 0.1 support:
 
 ```rust
 use livesplit_core::auto_splitting::Runtime;
-use livesplit_core::event::CommandSink;
 use std::path::PathBuf;
 
-// The runtime is generic over anything that implements CommandSink + TimerQuery.
-// Typically you use a SharedTimer.
+// Runtime<T> is generic over any T: CommandSink + TimerQuery + Send.
+// In most applications, T is livesplit_core::SharedTimer.
 let runtime: Runtime<_> = Runtime::new();
 
 // Load a WASM auto splitter, passing the timer it should control.
