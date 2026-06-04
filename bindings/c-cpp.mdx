@@ -1,0 +1,176 @@
+---
+title: "Using livesplit-core from C and C++"
+sidebarTitle: "C / C++"
+description: "Integrate livesplit-core into C and C++ applications using the generated C header and shared or static library. Manage object lifetimes with the drop functions."
+---
+
+The C binding is the lowest-level interface to livesplit-core. It consists of a single
+generated header file (`livesplit_core.h`) that declares every type and function in the
+library. Link against the compiled shared or static library to use it from any C or C++
+project.
+
+## Header structure
+
+The generated header starts with guards and standard includes:
+
+```c
+#ifndef LIVESPLIT_CORE_H
+#define LIVESPLIT_CORE_H
+
+#include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
+```
+
+For C++, the header wraps all declarations in a namespace and `extern "C"` block:
+
+```c
+#ifdef __cplusplus
+namespace LiveSplit {
+extern "C" {
+#endif
+```
+
+## Types
+
+Every livesplit-core object is an **opaque struct** accessed through three pointer typedefs:
+
+```c
+struct Timer_s;
+typedef struct Timer_s *restrict Timer;        // owned — you must call Timer_drop
+typedef struct Timer_s *restrict TimerRefMut;  // mutable borrow — do not free
+typedef struct Timer_s const*    TimerRef;     // shared borrow — do not free
+```
+
+The same pattern applies to `Run`, `Segment`, `Layout`, and every other object in the API.
+Only the plain (non-`Ref`) pointer represents ownership.
+
+## Object lifetimes and the drop functions
+
+Every **owned** object must be freed by calling its corresponding `_drop` function. The
+generator inserts this comment in the header for every drop function:
+
+```c
+/**
+Frees the object, allowing it to clean up all of its memory. You need
+to call this for every object that you don't use anymore and hasn't
+already been freed.
+*/
+void Timer_drop(Timer self);
+void Run_drop(Run self);
+void Segment_drop(Segment self);
+```
+
+<Warning>
+  Always call the `_drop` function for every owned object when you are done with it. Forgetting
+  to do so leaks the memory allocated by the Rust runtime and is **not** automatically recovered
+  when your process exits cleanly.
+</Warning>
+
+Functions whose return type is a plain object name (e.g. `Timer`) transfer ownership to the
+caller — you are responsible for calling `_drop`. Functions whose return type ends in `Ref` or
+`RefMut` do **not** transfer ownership; never call `_drop` on them.
+
+## Example
+
+```c
+#include "livesplit_core.h"
+#include <stdio.h>
+
+int main(void) {
+    /* Create a run */
+    Run run = Run_new();
+    Run_set_game_name(run, "Super Mario Odyssey");
+    Run_set_category_name(run, "Any%");
+
+    /* Add a segment (Run_push_segment takes ownership of the Segment) */
+    Segment seg = Segment_new("Cap Kingdom");
+    Run_push_segment(run, seg);
+    /* seg is now owned by run — do not call Segment_drop(seg) */
+
+    /* Create a timer (takes ownership of run; returns NULL if run had no segments) */
+    Timer timer = Timer_new(run);
+    if (!timer) {
+        /* run is consumed even on failure — do not call Run_drop(run) */
+        return 1;
+    }
+
+    /* Control the timer */
+    Timer_start(timer);
+    Timer_split(timer);
+    Timer_reset(timer, true); /* true = update splits / save attempt */
+
+    /* Clean up */
+    Timer_drop(timer);
+    return 0;
+}
+```
+
+## Building
+
+### Shared library
+
+```bash
+# Build
+cargo rustc --release -p livesplit-core-capi --crate-type cdylib
+
+# Compile your program (Linux)
+cc main.c -o main -L./target/release -llivesplit_core -Wl,-rpath,'$ORIGIN'
+
+# Compile your program (macOS)
+cc main.c -o main -L./target/release -llivesplit_core
+```
+
+### Static library
+
+```bash
+cargo rustc --release -p livesplit-core-capi --crate-type staticlib
+
+cc main.c -o main ./target/release/liblivesplit_core.a
+```
+
+Platform-specific library names:
+
+| Platform | Shared library | Static library |
+|---|---|---|
+| Linux | `liblivesplit_core.so` | `liblivesplit_core.a` |
+| macOS | `liblivesplit_core.dylib` | `liblivesplit_core.a` |
+| Windows | `livesplit_core.dll` | `livesplit_core.lib` |
+
+## Using from C++
+
+The header is valid C++ as-is. Inside C++ translation units all declarations live in the
+`LiveSplit` namespace:
+
+```cpp
+#include "livesplit_core.h"
+using namespace LiveSplit;
+
+int main() {
+    Run run = Run_new();
+    Run_set_game_name(run, "Celeste");
+    Run_set_category_name(run, "Any%");
+
+    Segment seg = Segment_new("Prologue");
+    Run_push_segment(run, seg);
+
+    Timer timer = Timer_new(run);
+    if (!timer) return 1;
+
+    Timer_start(timer);
+    Timer_split(timer);
+    Timer_drop(timer);
+}
+```
+
+You can write thin RAII wrappers around the C API to get automatic cleanup:
+
+```cpp
+struct OwnedTimer {
+    LiveSplit::Timer ptr;
+    explicit OwnedTimer(LiveSplit::Timer p) : ptr(p) {}
+    ~OwnedTimer() { if (ptr) LiveSplit::Timer_drop(ptr); }
+    OwnedTimer(const OwnedTimer&) = delete;
+    OwnedTimer& operator=(const OwnedTimer&) = delete;
+};
+```

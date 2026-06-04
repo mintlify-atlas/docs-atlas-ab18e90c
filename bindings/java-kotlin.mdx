@@ -1,0 +1,196 @@
+---
+title: "Using livesplit-core from Java and Kotlin"
+sidebarTitle: "Java / Kotlin"
+description: "Integrate livesplit-core into Java and Kotlin projects using JNA (Java Native Access) for desktop or JNI for Android, with auto-generated binding classes."
+---
+
+livesplit-core ships two Java-family binding strategies. Both produce idiomatic class
+hierarchies (with `Ref`, `RefMut`, and owned variants), but they use different mechanisms to
+call the native library.
+
+| Strategy | Mechanism | Best for |
+|---|---|---|
+| **JNA** | `com.sun.jna.Native.loadLibrary` | Desktop Java — no JNI glue required |
+| **JNI** | JNI C++ bridge + `System.loadLibrary` | Android; highest-performance path |
+
+The binding generator (`capi/bind_gen`) outputs both. Generated files live in
+`capi/bindings/java/jna/` and `capi/bindings/java/jni/`, plus a shared
+`LiveSplitCoreJNI.cpp` bridge file. Kotlin bindings are JNI-only and live in
+`capi/bindings/kotlin/jni/`.
+
+<Tabs>
+  <Tab title="JNA (Java — desktop)">
+
+### Dependencies
+
+Add JNA to your project:
+
+```xml
+<!-- Maven -->
+<dependency>
+    <groupId>net.java.dev.jna</groupId>
+    <artifactId>jna</artifactId>
+    <version>5.14.0</version>
+</dependency>
+```
+
+```groovy
+// Gradle
+implementation 'net.java.dev.jna:jna:5.14.0'
+```
+
+### How the binding works
+
+The generator produces a `LiveSplitCoreNative` interface that extends `Library` and loads
+the shared library by name:
+
+```java
+import com.sun.jna.*;
+
+public interface LiveSplitCoreNative extends Library {
+    LiveSplitCoreNative INSTANCE = (LiveSplitCoreNative)
+        Native.loadLibrary("livesplit_core", LiveSplitCoreNative.class);
+
+    Pointer Run_new();
+    void    Run_drop(Pointer self);
+    // ... all other functions
+}
+```
+
+Each livesplit-core type gets three classes — `RunRef`, `RunRefMut`, and `Run` — mirroring
+the ownership semantics of the Rust C API. Only the owned class (`Run`, `Timer`, …) has a
+`drop()` method.
+
+### Naming conventions
+
+Because `new`, `clone`, `close`, and `default` are reserved or problematic in Java, the
+generator renames them:
+
+| Rust method | Java method |
+|---|---|
+| `new` (nullable) | `create()` |
+| `new` (non-nullable) | constructor |
+| `clone` | `copy()` |
+| `close` | `finish()` |
+| `default` | `createDefault()` |
+
+All other method names are converted to `lowerCamelCase`.
+
+### Example
+
+```java
+import livesplitcore.*;
+
+// Run_new is non-nullable → Java constructor
+Run run = new Run();
+run.setGameName("Super Metroid");
+run.setCategoryName("Any%");
+run.pushSegment(new Segment("Ceres Station"));
+
+// Timer_new is nullable → static factory Timer.create(run)
+Timer timer = Timer.create(run);
+if (timer == null) {
+    throw new RuntimeException("Run must have at least one segment");
+}
+
+timer.start();
+timer.split();
+timer.reset(true); // true = update splits
+
+// Free native memory
+timer.drop();
+```
+
+<Warning>
+  Always call `.drop()` on every owned object when you are done with it. The JNA binding
+  does not register a finalizer that guarantees cleanup.
+</Warning>
+
+  </Tab>
+  <Tab title="JNI (Java / Kotlin — Android)">
+
+### Building the JNI bridge
+
+The generator produces a `LiveSplitCoreJNI.cpp` file alongside the Java/Kotlin class files.
+You must compile both the Rust library **and** the JNI C++ bridge:
+
+```bash
+# 1. Build the Rust static library for your Android ABI, e.g. arm64-v8a
+cargo build --release --target aarch64-linux-android -p livesplit-core-capi
+
+# 2. The JNI bridge is at capi/bindings/java/LiveSplitCoreJNI.cpp
+#    Add it to your Android CMakeLists.txt or ndk-build Android.mk
+```
+
+### Loading the library
+
+Generated classes use `System.loadLibrary` internally. In your `Application` or first
+`Activity`:
+
+```java
+static {
+    System.loadLibrary("livesplit_core");
+}
+```
+
+### Java JNI example
+
+```java
+import livesplitcore.*;
+
+Run run = new Run();
+run.setGameName("Celeste");
+run.setCategoryName("Any%");
+run.pushSegment(new Segment("Prologue"));
+
+Timer timer = Timer.create(run);
+if (timer == null) {
+    throw new RuntimeException("Run must have at least one segment");
+}
+timer.start();
+timer.split();
+timer.reset(true);
+timer.drop();
+```
+
+### Kotlin JNI example
+
+The Kotlin binding follows the same three-tier pattern (`TimerRef`, `TimerRefMut`, `Timer`).
+Nullable factory methods return `Timer?`.
+
+```kotlin
+import livesplitcore.*
+
+val run = Run()
+run.setGameName("Celeste")
+run.setCategoryName("Any%")
+run.pushSegment(Segment("Prologue"))
+
+val timer = Timer.create(run)
+    ?: error("Run must have at least one segment")
+
+timer.start()
+timer.split()
+timer.reset(true)
+timer.drop()
+```
+
+### Naming conventions
+
+The Kotlin/JNI generator applies the same renaming rules as the Java/JNA generator:
+
+| Rust method | Kotlin method |
+|---|---|
+| `new` (nullable) | `create()` |
+| `new` (non-nullable) | constructor |
+| `clone` | `copy()` |
+| `close` | `finish()` |
+| `default` | `createDefault()` |
+
+<Warning>
+  Always call `.drop()` on every owned object. Kotlin/Java objects wrapping native memory are
+  not automatically freed by the garbage collector.
+</Warning>
+
+  </Tab>
+</Tabs>

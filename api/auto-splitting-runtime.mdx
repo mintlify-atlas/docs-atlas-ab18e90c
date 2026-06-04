@@ -1,0 +1,170 @@
+---
+title: "AutoSplittingRuntime API Reference"
+sidebarTitle: "AutoSplittingRuntime"
+description: "AutoSplittingRuntime loads and manages WebAssembly auto splitter modules that automatically control the timer based on game memory values."
+---
+
+## Overview
+
+`livesplit_core::auto_splitting::Runtime` provides a runtime for **WebAssembly auto splitters** — small WASM modules that read game memory and automatically control the timer (start, split, reset, set game time, etc.) without any manual input from the runner.
+
+<Note>
+  The auto-splitting runtime requires the `auto-splitting` Cargo feature. Without it the type still exists but all operations return errors.
+</Note>
+
+The runtime runs the auto splitter in a **background thread** at a tick rate of 120 Hz by default (the auto splitter can change its own tick rate). A companion **watchdog thread** monitors the auto splitter and automatically unloads it if it becomes unresponsive.
+
+<Note>
+  Only one auto splitter can be loaded at a time. Calling `load` while another auto splitter is running replaces it immediately.
+</Note>
+
+---
+
+## Requirements for Auto Splitter Modules
+
+Auto splitter WASM modules must export an `update` function with this signature:
+
+```rust
+#[unsafe(no_mangle)]
+pub extern "C" fn update() {}
+```
+
+The runtime calls this function at the configured tick rate. The module must also export a linear memory named `memory`.
+
+The auto splitter communicates with the host through functions provided in the `env` module — timer control, process memory reading, settings access, and logging.
+
+---
+
+## Construction
+
+### `Runtime::new() -> Runtime<T>`
+
+Starts the auto-splitting runtime and background threads. Does **not** load an auto splitter yet — call `load` separately.
+
+The type parameter `T` must implement `event::CommandSink + TimerQuery + Send + 'static`. When used with the standard `SharedTimer`, use `Runtime<SharedTimer>`.
+
+```rust
+use livesplit_core::auto_splitting::Runtime;
+
+let runtime = Runtime::new();
+```
+
+---
+
+## Loading and Unloading
+
+### `load(path: PathBuf, timer: T) -> Result<(), Error>`
+
+Loads a WASM auto splitter file from disk and starts running it. The file is read, compiled, and instantiated. If a previous auto splitter was loaded, it is replaced. Returns an error if the file cannot be read (`Error::ReadFileFailed`) or if the WASM module fails to compile or instantiate (`Error::LoadFailed`).
+
+```rust
+use std::path::PathBuf;
+
+runtime.load(PathBuf::from("celeste.wasm"), shared_timer.clone())
+    .expect("Failed to load auto splitter");
+```
+
+### `unload() -> Result<(), Error>`
+
+Stops and unloads the current auto splitter. Returns `Ok(())` if no auto splitter was loaded (unloading an absent auto splitter is not an error). Returns `Err(Error::ThreadStopped)` only if the background thread has unexpectedly stopped.
+
+```rust
+runtime.unload().expect("Failed to unload auto splitter");
+```
+
+---
+
+## Watchdog
+
+The runtime spawns a dedicated **watchdog thread** alongside the auto-splitting thread. The watchdog monitors the auto splitter's tick timestamps. If the auto splitter fails to tick within the expected window, the watchdog unloads it automatically to prevent the timer from becoming unresponsive.
+
+This behavior is transparent — you don't need to configure the watchdog manually.
+
+---
+
+## Error Types
+
+```rust
+pub enum Error {
+    /// The auto splitter could not be compiled or instantiated.
+    LoadFailed { source: /* wasm error */ },
+    /// The auto splitter file could not be read from disk.
+    ReadFileFailed { source: io::Error },
+    /// The background runtime thread stopped unexpectedly.
+    ThreadStopped,
+    /// The auto splitter's settings could not be loaded.
+    SettingsLoadFailed,
+    /// A requested setting was not found in the settings map.
+    SettingNotFound,
+}
+```
+
+---
+
+## Full Rust Example
+
+```rust
+use livesplit_core::auto_splitting::Runtime;
+use std::path::PathBuf;
+
+// Create the runtime (starts background threads, no auto splitter yet)
+let runtime: Runtime<livesplit_core::SharedTimer> = Runtime::new();
+
+// Load an auto splitter WASM file
+runtime.load(PathBuf::from("celeste.wasm"), shared_timer.clone())
+    .expect("Failed to load auto splitter");
+
+// The auto splitter now controls the timer automatically at ~120 Hz.
+// The watchdog will unload it if it becomes unresponsive.
+
+// ...
+
+// When done, unload the auto splitter
+runtime.unload().expect("Failed to unload");
+
+// Dropping the Runtime stops all background threads.
+drop(runtime);
+```
+
+---
+
+## C API
+
+The C API wraps `Runtime<SharedTimer>` behind an opaque `OwnedAutoSplittingRuntime` pointer. Note that the C `load` function takes a path string and a `SharedTimer` object directly.
+
+| C function | Rust equivalent |
+|---|---|
+| `AutoSplittingRuntime_new()` | `Runtime::new()` |
+| `AutoSplittingRuntime_load(this, path, shared_timer)` | `runtime.load(path, timer)` — returns `bool` |
+| `AutoSplittingRuntime_unload(this)` | `runtime.unload()` — returns `bool` |
+| `AutoSplittingRuntime_drop(this)` | `drop(runtime)` |
+
+```c
+// C usage example
+OwnedAutoSplittingRuntime runtime = AutoSplittingRuntime_new();
+
+bool ok = AutoSplittingRuntime_load(runtime, "celeste.wasm", shared_timer);
+if (!ok) {
+    fprintf(stderr, "Failed to load auto splitter\n");
+}
+
+// ... run the timer ...
+
+AutoSplittingRuntime_unload(runtime);
+AutoSplittingRuntime_drop(runtime);
+```
+
+<Note>
+  When the `auto-splitting` Cargo feature is **not** enabled, `AutoSplittingRuntime_new` still returns a valid (non-null) object, but `AutoSplittingRuntime_load` and `AutoSplittingRuntime_unload` always return `false`.
+</Note>
+
+---
+
+## Cargo Feature
+
+Add the feature flag to your `Cargo.toml` to enable the auto-splitting runtime:
+
+```toml
+[dependencies]
+livesplit-core = { version = "...", features = ["auto-splitting"] }
+```

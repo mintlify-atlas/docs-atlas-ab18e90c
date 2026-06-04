@@ -1,0 +1,265 @@
+---
+title: "Layout Components Reference"
+sidebarTitle: "Components"
+description: "All 19 livesplit-core layout components: Timer, Splits, Title, Delta, Graph, PbChance, PossibleTimeSave, SumOfBest, CurrentPace, and more."
+---
+
+## Overview
+
+Every component in livesplit-core follows the same pattern: it holds its own **settings** struct and exposes a `state(image_cache, timer, general_settings, lang)` method that returns a **state** object. The state is a plain, serializable snapshot of everything a renderer needs to draw that component at a given instant. Renderers consume the state; they never hold a reference to the live timer or the component itself.
+
+All 19 built-in components live in the `livesplit_core::component` module and implement `Into<Component>`, so any of them can be pushed directly into a [`Layout`](/api/layout).
+
+```rust
+use livesplit_core::{
+    Layout,
+    component::{Timer, Splits, Title, Delta, SumOfBest},
+};
+
+let mut layout = Layout::new();
+layout.push(Title::new());
+layout.push(Splits::new(Default::default()));
+layout.push(Timer::new());
+layout.push(Delta::new());
+layout.push(SumOfBest::new());
+```
+
+<Note>
+  Component settings can be read and written as JSON via `component_settings_value` /
+  `set_component_settings_value` on the [`LayoutEditor`](/api/layout-editor). Each
+  component's settings are described by a `SettingsDescription` that lists every
+  field with its current value and allowed value type.
+</Note>
+
+---
+
+<AccordionGroup>
+
+<Accordion title="Timer Components">
+
+### `Timer`
+
+**Module:** `component::timer` · **State:** `component::timer::State`
+
+The main running timer display. Shows the total elapsed time of the current attempt as a digital clock. The color of the displayed time reflects how well the attempt is doing compared to the chosen comparison (ahead/behind/best segment/etc.).
+
+Key settings:
+- `timing_method` — override the active timing method (`RealTime` or `GameTime`), or follow the timer's current method
+- `comparison` — which comparison to color against (defaults to the timer's current comparison)
+- `background` — supports delta-based gradient backgrounds that shift color as the runner goes ahead or behind
+
+### `DetailedTimer`
+
+**Module:** `component::detailed_timer` · **State:** `component::detailed_timer::State`
+
+An extended timer that shows **two** times simultaneously: the total run time (like the `Timer` component) and the current segment time. Useful for runners who want to see segment pace at a glance alongside the overall time.
+
+Key settings:
+- `timing_method` — timing method override
+- `comparison1` / `comparison2` — separate comparisons for the two timers
+- `display_icon` — whether to show the current segment's icon
+
+</Accordion>
+
+<Accordion title="Split Information">
+
+### `Splits`
+
+**Module:** `component::splits` · **State:** `component::splits::State`
+
+The primary segment list component. Renders each segment in a tabular format with columns for the segment name, delta against the comparison, and split time. Supports scrolling so that only a configurable window of segments is shown at a time.
+
+Key settings:
+- `visual_split_count` — how many rows to display
+- `split_preview_count` — number of upcoming splits to show below the current split
+- `columns` — fully configurable column list; each column can show various time values (`SplitTime`, `Delta`, `SegmentTime`, `SegmentDelta`, etc.) and can be configured to update on split or continuously
+- `always_show_last_split` — keeps the final split visible even when scrolled
+- `separator_last_split` — draws an extra separator above the last split
+- `fill_with_blank_space` — pads short runs with blank rows to maintain a fixed height
+
+### `Title`
+
+**Module:** `component::title` · **State:** `component::title::State`
+
+Displays the game name, category name, and attempt count. Also shows the game's icon when one is set. The title component is typically placed at the top of a layout.
+
+Key settings:
+- `show_attempt_count` — toggles the attempt counter
+- `show_finished_runs_count` — toggles a counter of completed runs
+- `display_as_single_line` — renders game and category on one row instead of two
+- `center_title` — horizontally centers the text
+
+</Accordion>
+
+<Accordion title="Comparison & Delta">
+
+### `Delta`
+
+**Module:** `component::delta` · **State:** `component::key_value::State`
+
+Shows the current time delta between the active attempt and the chosen comparison. The value is colored semantically (e.g. green when ahead, red when behind). It updates live while a split is in progress if the runner is losing time.
+
+Key settings:
+- `comparison` — which comparison to measure against
+- `timing_method` — override the active timing method
+- `display_two_rows` — show label and value on separate rows
+- `drop_decimals` — hide sub-second precision to reduce visual noise
+
+### `PreviousSegment`
+
+**Module:** `component::previous_segment` · **State:** `component::key_value::State`
+
+Shows the delta for the most recently completed segment — how much faster or slower it was compared to that segment's comparison time. Useful for immediate feedback after each split.
+
+Key settings:
+- `comparison` — comparison to measure against
+- `timing_method` — override
+- `display_two_rows`
+
+### `CurrentPace`
+
+**Module:** `component::current_pace` · **State:** `component::key_value::State`
+
+Projects the final finish time of the current attempt at the current pace. If no attempt is running, it shows the comparison's final time instead. The value updates live when the runner is losing time on the current segment.
+
+Key settings:
+- `comparison` — the comparison used to project the final time
+- `timing_method` — override
+- `display_two_rows`
+
+### `PossibleTimeSave`
+
+**Module:** `component::possible_time_save` · **State:** `component::key_value::State`
+
+Shows how much time could theoretically be saved on the current segment, calculated as the comparison split time minus the best segment time. The displayed value shrinks toward zero in real-time as the segment progresses, so it reflects the remaining opportunity.
+
+Key settings:
+- `comparison` — the reference comparison
+- `timing_method` — override
+- `display_two_rows`
+- `total_possible_time_save` — when enabled, shows the sum of possible time saves for all remaining segments instead of just the current one
+
+### `PbChance`
+
+**Module:** `component::pb_chance` · **State:** `component::key_value::State`
+
+Shows the probability (0–100%) that the current attempt will beat the Personal Best. If there is no active attempt, it shows the general probability based on historical run data. During an attempt it updates live based on time gained or lost.
+
+The probability is calculated using a **skill curve** model derived from the segment history: it determines the percentile at which the current (projected) finish time lies on the distribution of all historical finishing performances. See [`analysis::pb_chance`](/api/analysis#pb_chance) for the underlying calculation.
+
+Key settings:
+- `display_two_rows`
+- `label_color` / `value_color`
+
+### `SumOfBest`
+
+**Module:** `component::sum_of_best` · **State:** `component::key_value::State`
+
+Displays the **Sum of Best Segments** — the theoretically fastest possible run time, assembled from the fastest individual segment times across all recorded attempts. Because skipped segments can create combined-segment records faster than their parts, this is calculated via dynamic programming over the full segment history rather than a simple sum.
+
+Key settings:
+- `timing_method` — override
+- `display_two_rows`
+
+</Accordion>
+
+<Accordion title="Text & Display">
+
+### `Text`
+
+**Module:** `component::text` · **State:** `component::text::State`
+
+A flexible text display that can show either a static string or a dynamic value sourced from timer variables. Useful for displaying custom metadata such as the current platform, patch version, or any key–value variable set by an auto splitter.
+
+Key settings:
+- `left` / `right` — independently configurable left and right text blocks; each can be a static string or a variable reference
+
+### `CurrentComparison`
+
+**Module:** `component::current_comparison` · **State:** `component::key_value::State`
+
+Shows the name of the comparison that is currently active (e.g. "Personal Best", "Best Segments", "Average Segments"). Updates automatically when the comparison is changed via hotkey or the API.
+
+### `SegmentTime`
+
+**Module:** `component::segment_time` · **State:** `component::key_value::State`
+
+Displays the live elapsed time of the current segment (time since the last split). Unlike `DetailedTimer`, this is a simple key–value row rather than a large digital clock.
+
+Key settings:
+- `timing_method` — override
+- `display_two_rows`
+
+### `TotalPlaytime`
+
+**Module:** `component::total_playtime` · **State:** `component::key_value::State`
+
+Shows the total accumulated time across all recorded attempts for the current run file, including the ongoing attempt if one is active. This is the sum of all attempt durations stored in the run's attempt history (with pause time subtracted).
+
+Key settings:
+- `display_two_rows`
+
+### `Carousel`
+
+**Module:** `component::carousel` · **State:** `component::carousel::State`
+
+Cycles through a list of child components automatically on a configurable timer. Only one child is visible at a time. Useful for rotating between multiple stats (e.g. cycling between `PbChance`, `CurrentPace`, and `PossibleTimeSave`) without consuming multiple rows of screen space.
+
+</Accordion>
+
+<Accordion title="Layout Structure">
+
+### `Group`
+
+**Module:** `component::group` · **State:** `component::group::State`
+
+A container that groups multiple child components together. Groups can be used to arrange components horizontally (creating rows) within an otherwise vertical layout, enabling side-by-side display of components. Components inside a group can be nested further.
+
+### `BlankSpace`
+
+**Module:** `component::blank_space` · **State:** `component::blank_space::State`
+
+Renders an empty rectangle, useful for adding padding or visual breathing room between other components in a layout.
+
+Key settings:
+- `background` — the background color or gradient to fill the blank space
+- `height` — the height of the blank space in layout units
+
+### `Separator`
+
+**Module:** `component::separator` · **State:** `component::separator::State`
+
+A thin horizontal rule drawn between components. Purely decorative; it has no settings beyond what is inherited from the general layout (separator color).
+
+### `Graph`
+
+**Module:** `component::graph` · **State:** `component::graph::State`
+
+Renders a historical performance graph showing the runner's split deltas over time across all recorded attempts. Each horizontal line represents a split point; the graph visualizes whether the runner was ahead or behind the comparison at each split in each recorded run.
+
+Key settings:
+- `comparison` — the reference comparison for the graph
+- `timing_method` — override
+- `live_graph` — when enabled, the current partial attempt is drawn in real time
+- `show_best_segments` — highlights best-segment splits
+- `height` — the height of the graph component
+
+</Accordion>
+
+</AccordionGroup>
+
+---
+
+## Shared State Shape
+
+Many components — `Delta`, `PreviousSegment`, `CurrentPace`, `PossibleTimeSave`, `PbChance`, `SumOfBest`, `CurrentComparison`, `SegmentTime`, `TotalPlaytime` — produce a `component::key_value::State`. This shared state has the following fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `key` | `String` | The label text (e.g. `"Possible Time Save"`) |
+| `value` | `String` | The formatted value (e.g. `"0:12"`) |
+| `key_abbreviations` | `Vec<Cow<str>>` | Shorter label alternatives for tight layouts |
+| `semantic_color` | `SemanticColor` | Semantic coloring hint (Ahead, Behind, BestSegment, etc.) |
+| `background` | `Gradient` | Background fill |
+| `display_two_rows` | `bool` | Whether key and value are on separate rows |
+| `updates_frequently` | `bool` | Whether the value changes sub-second (rendering hint) |

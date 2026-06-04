@@ -1,0 +1,198 @@
+---
+title: "Using livesplit-core from Ruby and Python"
+sidebarTitle: "Ruby / Python"
+description: "Call livesplit-core from Ruby using the FFI gem or from Python using ctypes, with auto-generated binding files that wrap the native C library."
+---
+
+Both Ruby and Python bindings are single-file wrappers that call the native `livesplit_core`
+shared library through their respective foreign-function-interface mechanisms. Generate them
+by running the binding generator:
+
+```bash
+cd capi/bind_gen
+cargo run
+# Ruby  → capi/bindings/LiveSplitCore.rb
+# Python → capi/bindings/livesplit_core.py
+```
+
+<Tabs>
+  <Tab title="Ruby">
+
+### Requirements
+
+- Ruby 2.0+
+- The [`ffi`](https://github.com/ffi/ffi) gem: `gem install ffi`
+- The `livesplit_core` native shared library
+
+### Library path
+
+The generated file loads the native library with `FFI::Library#ffi_lib`. By default it
+resolves relative to the binding file itself:
+
+```ruby
+ffi_lib File.expand_path('../liblivesplit_core.so', __FILE__)
+```
+
+You can override this at generation time with the `--ruby-lib-path` flag:
+
+```bash
+cargo run -- --ruby-lib-path /usr/local/lib/liblivesplit_core.so
+```
+
+### Class structure
+
+Each type has three Ruby classes:
+
+- `LiveSplitCore::TimerRef` — shared borrow (read-only methods)
+- `LiveSplitCore::TimerRefMut < TimerRef` — mutable borrow
+- `LiveSplitCore::Timer < TimerRefMut` — owned; `dispose` and `with` for cleanup
+
+The owned class registers an `ObjectSpace` finalizer so the native drop function is called
+when the Ruby object is garbage-collected — but you should still call `dispose` explicitly
+for deterministic cleanup.
+
+### Naming conventions
+
+Because `new` is a reserved Ruby method, the generator renames the `_new` static function to
+`create`:
+
+```ruby
+run = LiveSplitCore::Run.create   # calls Run_new() in C
+```
+
+All other method names use `snake_case`.
+
+### Example
+
+```ruby
+require_relative 'LiveSplitCore'
+
+# Run.create → calls Run_new()
+run = LiveSplitCore::Run.create
+run.set_game_name('Minecraft')
+run.set_category_name('Any%')
+
+# Segment.create → calls Segment_new()
+run.push_segment(LiveSplitCore::Segment.create('Enter World'))
+
+# Timer.create → calls Timer_new(); returns nil if run has no segments
+timer = LiveSplitCore::Timer.create(run)
+raise 'Run must have at least one segment' if timer.nil?
+
+timer.start
+timer.split
+timer.reset(true)   # true = update splits / save attempt
+
+# Explicit cleanup
+timer.dispose
+```
+
+Use `with` to scope cleanup automatically:
+
+```ruby
+LiveSplitCore::Timer.create(run).with do |timer|
+  timer.start
+  timer.split
+end
+# timer.dispose is called here
+```
+
+<Warning>
+  Although `ObjectSpace.define_finalizer` is registered, do not rely on it for prompt
+  cleanup. Call `dispose` or use the `with` block when you are done with an owned object.
+</Warning>
+
+  </Tab>
+  <Tab title="Python">
+
+### Requirements
+
+- Python 3.x
+- No third-party packages needed — the binding uses the standard library `ctypes` module
+- The `livesplit_core` native shared library
+
+### Library loading
+
+The generated file detects the platform automatically:
+
+```python
+import sys, ctypes
+
+prefix    = {'win32': ''}.get(sys.platform, './lib')
+extension = {'darwin': '.dylib', 'win32': '.dll'}.get(sys.platform, '.so')
+livesplit_core_native = ctypes.cdll.LoadLibrary(prefix + "livesplit_core" + extension)
+```
+
+Place `liblivesplit_core.so` / `livesplit_core.dll` / `liblivesplit_core.dylib` in the
+working directory, or adjust `LD_LIBRARY_PATH` / `DYLD_LIBRARY_PATH` / `PATH` before
+importing.
+
+### Class structure
+
+Each type has three Python classes:
+
+- `TimerRef` — shared borrow (read-only methods)
+- `TimerRefMut(TimerRef)` — mutable borrow
+- `Timer(TimerRefMut)` — owned; has `drop()`, `__del__()`, `__enter__` / `__exit__`
+
+The owned class defines `__del__` so Python's cyclic garbage collector will eventually call
+the native drop function — but this is not guaranteed to happen promptly.
+
+### Type annotations
+
+The binding uses `ctypes` type constants for all function signatures:
+
+```python
+from ctypes import c_char_p, c_void_p, c_bool, c_uint32, ...
+
+livesplit_core_native.Run_new.argtypes = ()
+livesplit_core_native.Run_new.restype  = c_void_p
+
+livesplit_core_native.Timer_new.argtypes = (c_void_p,)
+livesplit_core_native.Timer_new.restype  = c_void_p
+```
+
+### Example
+
+```python
+from livesplit_core import Run, Segment, Timer
+
+run = Run.new()
+run.set_game_name('Portal 2')
+run.set_category_name('Any%')
+run.push_segment(Segment.new('Container Ride'))
+
+timer = Timer.new(run)
+if timer is None:
+    raise RuntimeError('Run must have at least one segment')
+
+timer.start()
+timer.split()
+timer.reset(True)   # True = update splits / save attempt
+
+# Explicit cleanup
+timer.drop()
+```
+
+Use the context manager for automatic cleanup:
+
+```python
+from livesplit_core import Run, Segment, Timer
+
+run = Run.new()
+run.push_segment(Segment.new('Container Ride'))
+
+with Timer.new(run) as timer:
+    timer.start()
+    timer.split()
+# timer.drop() is called here via __exit__
+```
+
+<Warning>
+  Python's garbage collector does **not** guarantee that `__del__` is called promptly, or at
+  all in some interpreter implementations. Always call `drop()` explicitly, or use the `with`
+  statement, to ensure native memory is freed without delay.
+</Warning>
+
+  </Tab>
+</Tabs>

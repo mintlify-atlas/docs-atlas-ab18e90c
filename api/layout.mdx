@@ -1,0 +1,180 @@
+---
+title: "Layout API Reference"
+sidebarTitle: "Layout"
+description: "The Layout type combines multiple components to render a timer UI. It produces a LayoutState from a Timer snapshot that any renderer can consume."
+---
+
+## Overview
+
+A `Layout` is an ordered list of [`Component`](/api/components) objects that together produce a renderable `LayoutState`. The `LayoutState` is a plain, serializable snapshot of everything the UI needs to draw at a given instant — fonts, colors, background, and each component's own state. Any renderer (native, web, terminal, etc.) can consume it without holding a reference to the live timer.
+
+The layout itself is stateful: components may cache intermediate data between frames to avoid redundant computation. You should call `state` (or `update_state`) on every render tick, passing the current timer snapshot.
+
+---
+
+## Construction
+
+### `Layout::new() -> Layout`
+
+Creates a new empty layout with no components.
+
+```rust
+let layout = Layout::new();
+```
+
+### `Layout::default_layout(lang: Lang) -> Layout`
+
+Creates a layout pre-populated with a useful default set of components: `Title`, `Splits`, `Timer`, and `PreviousSegment`. Which components are included and how they are configured may change in future versions.
+
+```rust
+let layout = Layout::default_layout(Default::default());
+```
+
+### `Layout::from_settings(settings: LayoutSettings) -> Layout`
+
+Reconstructs a `Layout` from a `LayoutSettings` value. `LayoutSettings` carries both the general layout settings and the per-component settings.
+
+```rust
+let settings: LayoutSettings = /* ... */;
+let layout = Layout::from_settings(settings);
+```
+
+### `Layout::parse_json(settings: &str) -> Option<Layout>`
+
+Parses a layout from a JSON string previously produced by `settings_as_json`. Returns `None` if the string cannot be parsed.
+
+```rust
+let json = std::fs::read_to_string("layout.json").unwrap();
+let layout = Layout::parse_json(&json).expect("Invalid layout JSON");
+```
+
+---
+
+## Managing Components
+
+### `push<C: Into<Component>>(component: C)`
+
+Appends a component to the end of the layout. All built-in component types implement `Into<Component>` so you can pass them directly.
+
+```rust
+use livesplit_core::component::{Timer, Splits};
+
+layout.push(Timer::new());
+layout.push(Splits::new(Default::default()));
+```
+
+### `components: Vec<Component>`
+
+The `components` field is public and gives direct access to the full component list for inspection or bulk manipulation.
+
+---
+
+## Rendering
+
+### `state(image_cache: &mut ImageCache, timer: &Snapshot, lang: Lang) -> LayoutState`
+
+Calculates the `LayoutState` for the current timer moment. All images referenced in the state are inserted into (and marked as visited in) the `ImageCache`. Call [`ImageCache::collect`] after rendering to evict stale images.
+
+```rust
+let mut image_cache = ImageCache::new();
+let state = layout.state(&mut image_cache, &timer.snapshot(), Default::default());
+```
+
+### `update_state(state: &mut LayoutState, image_cache: &mut ImageCache, timer: &Snapshot, lang: Lang)`
+
+An in-place variant that updates an existing `LayoutState` rather than allocating a new one each frame. Prefer this for high-frequency rendering loops.
+
+```rust
+let mut state = LayoutState::default();
+loop {
+    layout.update_state(&mut state, &mut image_cache, &timer.snapshot(), lang);
+    renderer.render(&state, &image_cache);
+}
+```
+
+---
+
+## Settings
+
+### `settings() -> LayoutSettings`
+
+Returns a `LayoutSettings` value containing the general settings and the settings of every component.
+
+### `general_settings() -> &GeneralSettings`
+
+Accesses the general settings (background color, fonts, separator colors, direction) without cloning.
+
+### `general_settings_mut() -> &mut GeneralSettings`
+
+Grants mutable access to the general settings.
+
+### `settings_as_json() -> String`
+
+Serializes the layout settings (general + all components) to a JSON string. Use this to persist a layout to disk.
+
+```rust
+let json = layout.settings_as_json();
+std::fs::write("layout.json", json).unwrap();
+```
+
+---
+
+## Scrolling
+
+### `scroll_up()` / `scroll_down()`
+
+Forwards a scroll event to every component in the layout that supports scrolling (primarily the `Splits` component). Call these in response to mouse wheel or keyboard events.
+
+```rust
+layout.scroll_up();
+```
+
+---
+
+## Full Example
+
+```rust
+use livesplit_core::{Layout, settings::ImageCache};
+
+// Default layout with a standard set of components
+let mut layout = Layout::default_layout(Default::default());
+
+// Get the renderable state for the current timer moment
+let mut image_cache = ImageCache::new();
+let state = layout.state(&mut image_cache, &timer.snapshot(), Default::default());
+
+// Or serialize the layout settings to JSON for persistence
+let json = layout.settings_as_json();
+std::fs::write("layout.json", json).unwrap();
+```
+
+Loading a saved layout:
+
+```rust
+let json = std::fs::read_to_string("layout.json").unwrap();
+let layout = Layout::parse_json(&json).expect("Invalid layout JSON");
+```
+
+---
+
+## C API
+
+The C API mirrors the Rust API for use from languages that consume the livesplit-core shared library.
+
+| C function | Rust equivalent |
+|---|---|
+| `Layout_new()` | `Layout::new()` |
+| `Layout_default_layout(lang)` | `Layout::default_layout(lang)` |
+| `Layout_parse_json(settings)` | `Layout::parse_json(&str)` |
+| `Layout_push(this, component)` | `layout.push(component)` |
+| `Layout_state(this, image_cache, timer, lang)` | `layout.state(...)` |
+| `Layout_update_state(this, state, image_cache, timer, lang)` | `layout.update_state(...)` |
+| `Layout_state_as_json(this, image_cache, timer, lang)` | JSON-encoded `LayoutState` |
+| `Layout_settings_as_json(this)` | `layout.settings_as_json()` |
+| `Layout_scroll_up(this)` / `Layout_scroll_down(this)` | `layout.scroll_up()` / `layout.scroll_down()` |
+| `Layout_clone(this)` | `layout.clone()` |
+| `Layout_drop(this)` | `drop(layout)` |
+
+`Layout_parse_file_handle(handle)` additionally accepts an open file descriptor (integer handle) and parses directly from it.
+
+`Layout_parse_original_livesplit(data, length)` attempts a lossy parse of a layout saved by the original LiveSplit application. Not everything can be converted; `NULL` is returned if parsing fails entirely.

@@ -1,0 +1,220 @@
+---
+title: "Timer API Reference"
+sidebarTitle: "Timer"
+description: "Complete API reference for the livesplit-core Timer type: construction, timer controls, game time management, comparisons, state access, and persistence."
+---
+
+`Timer` is the central type in livesplit-core. It wraps a `Run` and manages all state for a speedrun attempt — tracking the current phase, recording split times, handling game time, and maintaining the attempt history. Every interaction with an active run goes through the `Timer`.
+
+## Construction
+
+<ParamField path="Timer::new(run: Run)" type="Result<Timer, CreationError>">
+  Creates a new Timer from a Run. The Run must have at least one segment; otherwise `Err(CreationError::EmptyRun)` is returned.
+</ParamField>
+
+<ParamField path="Timer::into_shared(self)" type="SharedTimer">
+  Converts the Timer into a `SharedTimer` (`Arc<RwLock<Timer>>`), allowing it to be shared and controlled across multiple threads. Required for use with `HotkeySystem` and `AutoSplittingRuntime`.
+</ParamField>
+
+<ParamField path="Timer::into_run(self, update_splits: bool)" type="Run">
+  Extracts the underlying Run, resetting any in-progress attempt. If `update_splits` is `true`, the current attempt's data is stored in the Run's history before returning.
+</ParamField>
+
+```rust
+use livesplit_core::{Run, Segment, Timer};
+
+let mut run = Run::new();
+run.set_game_name("Super Mario Odyssey");
+run.set_category_name("Any%");
+run.push_segment(Segment::new("Cap Kingdom"));
+run.push_segment(Segment::new("Cascade Kingdom"));
+
+let mut timer = Timer::new(run).expect("Run must have at least one segment");
+```
+
+## Timer Controls
+
+All control methods return `Result<Event, Error>`. An `Ok(Event)` value describes what changed; an `Err(Error)` value explains why the command was rejected.
+
+| Method | Description |
+|---|---|
+| `start()` | Starts a new attempt. Fails if an attempt is already in progress. |
+| `split()` | Records the current time as the split time. Ends the attempt when the last split is recorded. |
+| `split_or_start()` | Starts a new attempt if not running, or splits if running. |
+| `skip_split()` | Skips the current split. Fails if the current split is the last one. |
+| `undo_split()` | Removes the most recently recorded split time. Switches the phase back to `Running` if the attempt had ended. |
+| `pause()` | Pauses an active attempt. Fails if already paused. |
+| `resume()` | Resumes a paused attempt. Fails if not paused. |
+| `toggle_pause()` | Toggles between `Paused` and `Running`. |
+| `toggle_pause_or_start()` | Toggles pause if running, or starts a new attempt if not running. |
+| `undo_all_pauses()` | Removes all accumulated pause time from the current attempt. |
+| `reset(update_splits: bool)` | Resets the current attempt. If `update_splits` is `true`, the attempt is saved to the history. |
+| `reset_and_set_attempt_as_pb()` | Resets and stores the current attempt as the new personal best. |
+
+```rust
+timer.start().unwrap();
+
+// Record splits
+timer.split().unwrap();
+timer.split().unwrap(); // Last split — attempt ends
+
+// Or reset and try again
+timer.reset(true).unwrap(); // save to history
+```
+
+## Game Time
+
+Game Time allows tracking a separate timer driven by the game or auto splitter rather than wall-clock time. It must be explicitly initialized for each attempt.
+
+<ParamField path="is_game_time_initialized()" type="bool">
+  Returns `true` if game time has been initialized for the current attempt.
+</ParamField>
+
+<ParamField path="initialize_game_time()" type="Result<Event, Error>">
+  Enables game time tracking for the current attempt. Game time is automatically deinitialized when the attempt is reset.
+</ParamField>
+
+<ParamField path="deinitialize_game_time()">
+  Disables game time for the current attempt.
+</ParamField>
+
+<ParamField path="set_game_time(time: TimeSpan)" type="Result<Event, Error>">
+  Sets the game time to the given value. Works even when game time is paused, which is useful for periodic updates without auto-increment.
+</ParamField>
+
+<ParamField path="loading_times()" type="TimeSpan">
+  Returns the accumulated loading times. Loading times are defined as `Game Time - Real Time`.
+</ParamField>
+
+<ParamField path="set_loading_times(time: TimeSpan)" type="Result<Event, Error>">
+  Sets the loading time offset. The game time is then computed as `Real Time - Loading Times` automatically.
+</ParamField>
+
+<ParamField path="is_game_time_paused()" type="bool">
+  Returns `true` if the game timer is currently paused (not auto-incrementing).
+</ParamField>
+
+<ParamField path="pause_game_time()" type="Result<Event, Error>">
+  Pauses the game timer so it stops auto-incrementing. Use `set_game_time` to update it manually.
+</ParamField>
+
+<ParamField path="resume_game_time()" type="Result<Event, Error>">
+  Resumes the game timer so it auto-increments like real time from its current value.
+</ParamField>
+
+```rust
+// Enable game time for this attempt
+timer.initialize_game_time().unwrap();
+
+// Option A: Update game time directly (e.g., from game memory)
+use livesplit_core::TimeSpan;
+timer.set_game_time(TimeSpan::from_seconds(137.5)).unwrap();
+
+// Option B: Track loading times; game time = real time - loads
+timer.set_loading_times(TimeSpan::from_seconds(12.0)).unwrap();
+```
+
+## State Access
+
+<ParamField path="current_phase()" type="TimerPhase">
+  Returns the current `TimerPhase`: `NotRunning`, `Running`, `Paused`, or `Ended`.
+</ParamField>
+
+<ParamField path="current_split_index()" type="Option<usize>">
+  Returns the index of the segment currently being timed, or `None` if no attempt is in progress. When the attempt has ended but not been reset, this equals the total segment count.
+</ParamField>
+
+<ParamField path="snapshot()" type="Snapshot<'_>">
+  Returns a point-in-time snapshot of the timer. All layout rendering should use a snapshot to ensure consistency within a single render frame.
+</ParamField>
+
+<ParamField path="current_timing_method()" type="TimingMethod">
+  Returns the currently active timing method (`RealTime` or `GameTime`).
+</ParamField>
+
+<ParamField path="set_current_timing_method(method: TimingMethod)">
+  Switches the active timing method.
+</ParamField>
+
+<ParamField path="toggle_timing_method()">
+  Toggles between `RealTime` and `GameTime`.
+</ParamField>
+
+<ParamField path="current_comparison()" type="&str">
+  Returns the name of the comparison currently active (e.g. `"Personal Best"`, `"Best Segments"`).
+</ParamField>
+
+<ParamField path="set_current_comparison(comparison: &str)" type="Result<Event, Error>">
+  Sets the active comparison. Returns `Err(ComparisonDoesntExist)` if the comparison name is not registered.
+</ParamField>
+
+<ParamField path="switch_to_next_comparison()">
+  Advances to the next comparison in the list.
+</ParamField>
+
+<ParamField path="switch_to_previous_comparison()">
+  Goes back to the previous comparison in the list.
+</ParamField>
+
+<ParamField path="run()" type="&Run">
+  Accesses the Run currently loaded in the Timer.
+</ParamField>
+
+## Custom Variables
+
+<ParamField path="set_custom_variable(name: &str, value: &str)">
+  Sets a custom variable value. If the variable has not been pre-declared in the Run, it becomes a temporary variable that will not be saved to the splits file.
+</ParamField>
+
+```rust
+// Set a temporary variable (e.g., from an auto splitter)
+timer.set_custom_variable("maps_completed", "3");
+```
+
+## Persistence
+
+<ParamField path="current_attempt_has_new_best_times()" type="bool">
+  Returns `true` if the current attempt has achieved new best times in any segment or a new personal best. Use this to prompt the user whether to save before resetting.
+</ParamField>
+
+<ParamField path="save_as_lss()" type="String">
+  Serializes the current Run (including all history) as a LiveSplit LSS XML string.
+</ParamField>
+
+<ParamField path="mark_as_unmodified()">
+  Marks the Run as unmodified, indicating all changes have been persisted. Useful after saving to disk.
+</ParamField>
+
+## Events and Errors
+
+Most timer control methods return `Result<Event, Error>`.
+
+**`Event` variants** — describe what changed:
+
+| Variant | Description |
+|---|---|
+| `Started` | A new attempt was started. |
+| `Splitted` | A split was recorded (non-final). |
+| `Finished` | The final split was recorded; the run is now ended. |
+| `Reset` | The attempt was reset. |
+| `SplitUndone` | The last split was undone. |
+| `SplitSkipped` | The current split was skipped. |
+| `Paused` / `Resumed` | The timer was paused or resumed. |
+| `PausesUndone` | All pause times were removed. |
+| `ComparisonChanged` | The active comparison changed. |
+| `GameTimeSet` / `GameTimeInitialized` | Game time was updated or initialized. |
+| `CustomVariableSet` | A custom variable was set. |
+
+**`Error` variants** — explain rejected commands:
+
+| Variant | Description |
+|---|---|
+| `RunAlreadyInProgress` | `start()` called when a run is running. |
+| `NoRunInProgress` | Control called when no attempt is active. |
+| `RunFinished` | Command invalid because the run has ended. |
+| `NegativeTime` | Cannot split while the timer shows negative time. |
+| `CantSkipLastSplit` | The last split cannot be skipped. |
+| `CantUndoFirstSplit` | There is no previous split to undo. |
+| `AlreadyPaused` / `NotPaused` | Pause/resume called in the wrong state. |
+| `ComparisonDoesntExist` | Named comparison not found. |
+| `GameTimeAlreadyInitialized` | `initialize_game_time()` called twice. |

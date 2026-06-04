@@ -1,0 +1,173 @@
+---
+title: "HotkeySystem API Reference"
+sidebarTitle: "HotkeySystem"
+description: "HotkeySystem manages global keyboard hotkeys for timer control. It works on Windows, macOS, Linux, and web, even when the application is not focused."
+---
+
+## Overview
+
+`HotkeySystem<S>` registers **global keyboard hotkeys** that fire even when the application window is not focused, allowing runners to control the timer from any window. The type parameter `S` must implement `CommandSink` — in practice this is the `SharedTimer` wrapper that translates hotkey events into timer commands (split, reset, undo, etc.).
+
+Hotkey support is platform-dependent. On platforms that do not support global hotkeys, the system is compiled in but all operations are no-ops. By default the `HotkeySystem` is **activated** immediately upon creation.
+
+---
+
+## Construction
+
+### `HotkeySystem::new(sink: S) -> Result<HotkeySystem<S>>`
+
+Creates a new `HotkeySystem` using the **default `HotkeyConfig`** (see the defaults table below). Returns an error if the platform does not support hotkeys or if registration fails.
+
+```rust
+use livesplit_core::HotkeySystem;
+
+let system = HotkeySystem::new(command_sink).expect("Failed to start hotkey system");
+```
+
+### `HotkeySystem::with_config(sink: S, config: HotkeyConfig) -> Result<HotkeySystem<S>>`
+
+Creates a new `HotkeySystem` with a **custom `HotkeyConfig`**. Returns an error if the configuration contains duplicate hotkeys or if registration fails.
+
+```rust
+use livesplit_core::{HotkeySystem, HotkeyConfig};
+use livesplit_core::hotkey::{KeyCode, Hotkey};
+
+let mut config = HotkeyConfig::default();
+config.split = Some(Hotkey::from(KeyCode::F1));
+config.reset = Some(Hotkey::from(KeyCode::F5));
+
+let system = HotkeySystem::with_config(command_sink, config)
+    .expect("Failed to start hotkey system");
+```
+
+---
+
+## Activation
+
+### `activate() -> Result<()>`
+
+Re-enables the hotkey system after it has been deactivated. If the system is already active, this is a no-op.
+
+```rust
+system.activate().unwrap();
+```
+
+### `deactivate() -> Result<()>`
+
+Temporarily disables all hotkeys. No hotkey events are fired while deactivated. Use this while a settings dialog is open to prevent accidental splits.
+
+```rust
+// While settings dialog is open
+system.deactivate().unwrap();
+
+// Dialog closed — re-enable
+system.activate().unwrap();
+```
+
+---
+
+## Configuration
+
+### `config() -> HotkeyConfig`
+
+Returns a copy of the `HotkeyConfig` currently in use.
+
+```rust
+let current_config = system.config();
+println!("Split key: {:?}", current_config.split);
+```
+
+### `set_config(config: HotkeyConfig) -> Result<()>`
+
+Replaces the active hotkey configuration. Each hotkey is re-registered. Returns an error if the new configuration has duplicate hotkeys (the same key assigned to more than one action). The previous configuration remains active if the call fails.
+
+```rust
+let mut config = system.config();
+config.toggle_timing_method = Some(Hotkey::from(KeyCode::F9));
+system.set_config(config).unwrap();
+```
+
+### `resolve(key_code: KeyCode) -> Option<String>`
+
+Resolves a `KeyCode` to its localized name according to the current keyboard layout. Useful for displaying hotkey labels to the user in the correct script.
+
+---
+
+## `HotkeyConfig` Fields
+
+`HotkeyConfig` is a plain struct with one `Option<Hotkey>` field per timer action. `None` means the action has no hotkey assigned.
+
+| Field | Default | Action |
+|---|---|---|
+| `split` | `Numpad1` | Start the timer / split to the next segment |
+| `reset` | `Numpad3` | Reset the current attempt |
+| `undo` | `Numpad8` | Undo the last split |
+| `skip` | `Numpad2` | Skip the current split without recording a time |
+| `pause` | `Numpad5` | Pause / resume the timer; also starts a new attempt |
+| `undo_all_pauses` | `None` | Remove all accumulated pause time from the current attempt |
+| `previous_comparison` | `Numpad4` | Switch to the previous comparison |
+| `next_comparison` | `Numpad6` | Switch to the next comparison |
+| `toggle_timing_method` | `None` | Toggle between Real Time and Game Time |
+
+`HotkeyConfig` derives `Default`, so `HotkeyConfig::default()` gives you the table above. It also derives `Serialize`/`Deserialize` for JSON persistence:
+
+```rust
+// Save
+let json = serde_json::to_string(&config).unwrap();
+std::fs::write("hotkeys.json", json).unwrap();
+
+// Load
+let json = std::fs::read_to_string("hotkeys.json").unwrap();
+let config: HotkeyConfig = serde_json::from_str(&json).unwrap();
+```
+
+---
+
+## Full Example
+
+```rust
+use livesplit_core::{
+    HotkeySystem,
+    hotkey_config::HotkeyConfig,
+    hotkey::{KeyCode, Hotkey},
+};
+
+// Customize hotkeys
+let mut config = HotkeyConfig::default();
+config.split = Some(Hotkey::from(KeyCode::F1));
+config.reset = Some(Hotkey::from(KeyCode::F5));
+config.toggle_timing_method = Some(Hotkey::from(KeyCode::F9));
+
+// Start the system
+let mut system = HotkeySystem::with_config(command_sink, config).unwrap();
+
+// Temporarily disable (e.g. while a settings dialog is open)
+system.deactivate().unwrap();
+
+// Re-enable after the dialog closes
+system.activate().unwrap();
+
+// Update a single hotkey without recreating the system
+let mut config = system.config();
+config.undo_all_pauses = Some(Hotkey::from(KeyCode::F10));
+system.set_config(config).unwrap();
+```
+
+---
+
+## C API
+
+The C API uses a `CommandSink` (provided by the capi layer) as the `HotkeySystem` sink type. Hotkey configuration is managed through a separate `HotkeyConfig` opaque type.
+
+| C function | Rust equivalent |
+|---|---|
+| `HotkeySystem_new(command_sink)` | `HotkeySystem::new(sink)` |
+| `HotkeySystem_with_config(command_sink, config)` | `HotkeySystem::with_config(sink, config)` |
+| `HotkeySystem_activate(this)` | `system.activate()` — returns `bool` |
+| `HotkeySystem_deactivate(this)` | `system.deactivate()` — returns `bool` |
+| `HotkeySystem_config(this)` | `system.config()` — returns owned `HotkeyConfig` |
+| `HotkeySystem_set_config(this, config)` | `system.set_config(config)` — returns `bool` |
+| `HotkeySystem_resolve(this, key_code)` | `system.resolve(key_code)` |
+| `HotkeySystem_drop(this)` | `drop(system)` |
+
+On WebAssembly with the `wasm-web` feature, `HotkeySystem_add_window(hotkey_system, window)` is additionally available to forward keyboard events from a child `Window` object.

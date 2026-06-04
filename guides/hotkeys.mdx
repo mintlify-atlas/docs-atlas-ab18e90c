@@ -1,0 +1,171 @@
+---
+title: "Global Hotkeys for Timer Control"
+sidebarTitle: "Hotkeys"
+description: "Configure global hotkeys in livesplit-core to control the timer from the keyboard even when your application is not in focus, across Windows, macOS, Linux, and web."
+---
+
+`HotkeySystem` registers global keyboard shortcuts that fire even when your application window does not have focus. It works across Windows, macOS, Linux, and the web (via the `wasm-web` feature). On platforms that do not support global hotkeys, the system compiles and runs without error but never receives any key events — it is a safe no-op.
+
+---
+
+## HotkeyConfig
+
+`HotkeyConfig` maps timer actions to optional hotkeys. Each field is `Option<Hotkey>` — set it to `None` to disable that action.
+
+| Field | Default | Description |
+|---|---|---|
+| `split` | `Numpad1` | Split the current segment (also starts a new attempt). |
+| `reset` | `Numpad3` | Reset the current attempt. |
+| `undo` | `Numpad8` | Undo the last split. |
+| `skip` | `Numpad2` | Skip the current split without recording a time. |
+| `pause` | `Numpad5` | Pause the current attempt (can also start a new attempt). |
+| `undo_all_pauses` | `None` | Remove all accumulated pause time from the current time. |
+| `previous_comparison` | `Numpad4` | Switch to the previous comparison. |
+| `next_comparison` | `Numpad6` | Switch to the next comparison. |
+| `toggle_timing_method` | `None` | Toggle between Real Time and Game Time. |
+
+The struct is `Copy`, `Clone`, and serializable via `serde`. You can persist the user's configuration as JSON:
+
+```rust
+use livesplit_core::HotkeyConfig;
+
+// Serialize to JSON.
+let mut json_out = Vec::new();
+config.write_json(&mut json_out).unwrap();
+
+// Deserialize from JSON.
+let config = HotkeyConfig::from_json(&json_out[..]).unwrap();
+```
+
+---
+
+## Creating a HotkeySystem
+
+`HotkeySystem` is generic over the `CommandSink` it sends timer commands to. In most setups you use a `SharedTimer` wrapped in livesplit-core's `CommandSink`.
+
+### Default Hotkeys
+
+```rust
+use livesplit_core::HotkeySystem;
+
+// Uses the HotkeyConfig::default() mapping (Numpad1=split, Numpad3=reset, etc.)
+let hotkey_system = HotkeySystem::new(command_sink.clone())
+    .expect("Failed to create hotkey system");
+```
+
+### Custom Hotkeys
+
+```rust
+use livesplit_core::{HotkeySystem, HotkeyConfig};
+use livesplit_core::hotkey::KeyCode;
+
+let mut config = HotkeyConfig::default();
+config.split  = Some(KeyCode::F1.into());
+config.reset  = Some(KeyCode::F2.into());
+config.pause  = Some(KeyCode::F3.into());
+// Disable the undo action entirely.
+config.undo   = None;
+
+let hotkey_system = HotkeySystem::with_config(command_sink.clone(), config)
+    .expect("Failed to create hotkey system");
+```
+
+<Note>
+  Each hotkey must be unique across all actions in a config. `HotkeySystem::with_config` and `set_config` will return an error if the same key is assigned to multiple actions.
+</Note>
+
+---
+
+## Activating and Deactivating
+
+The hotkey system is **active by default** after construction. You can temporarily suspend it — for example while a rebinding dialog is open — and resume it afterwards:
+
+```rust
+// Pause hotkey listening (e.g. to capture a new key binding).
+hotkey_system.deactivate().unwrap();
+
+// Resume hotkey listening.
+hotkey_system.activate().unwrap();
+```
+
+---
+
+## Updating the Configuration at Runtime
+
+The configuration can be replaced without recreating the system:
+
+```rust
+// Apply a new configuration.
+// Fails if any hotkey appears in multiple actions.
+hotkey_system.set_config(new_config).unwrap();
+
+// Read the configuration currently in use.
+let current_config: HotkeyConfig = hotkey_system.config();
+```
+
+---
+
+## Key Resolution
+
+On platforms where the keyboard layout affects key names (e.g. an AZERTY layout renames `KeyQ` to the physical `A` position), you can resolve a `KeyCode` to its layout-specific label:
+
+```rust
+use livesplit_core::hotkey::KeyCode;
+
+let label = hotkey_system.resolve(KeyCode::KeyQ);
+// On an AZERTY layout this might return "A".
+```
+
+The C API exposes the same functionality:
+
+```c
+const char *label = HotkeySystem_resolve(hotkey_system, "KeyQ");
+```
+
+---
+
+## C API
+
+```c
+// Create with default hotkeys.
+HotkeySystem *hs = HotkeySystem_new(command_sink);
+
+// Create with a custom config.
+HotkeySystem *hs = HotkeySystem_with_config(command_sink, config);
+
+// Toggle.
+HotkeySystem_deactivate(hs); // returns bool — false on error
+HotkeySystem_activate(hs);
+
+// Config access.
+HotkeyConfig *cfg = HotkeySystem_config(hs);      // caller owns the returned config
+bool ok = HotkeySystem_set_config(hs, new_config); // false if a key is duplicated
+
+// Free.
+HotkeySystem_drop(hs);
+```
+
+---
+
+## Web: Listening on Additional Windows
+
+When running in the browser (target `wasm32-unknown-unknown` with the `wasm-web` feature), you can forward key events from child windows or iframes to the same hotkey system:
+
+```rust
+// On the web target only.
+hotkey_system.add_window(child_window).unwrap();
+```
+
+Or via the generated JavaScript/WASM binding:
+
+```js
+HotkeySystem_add_window(hotkeySystem, childWindow);
+```
+
+This is useful for timer overlays that embed a game in a child window while the hotkey system lives in the parent.
+
+---
+
+## How CommandSink Works
+
+`HotkeySystem` does not hold a direct reference to a `Timer`. Instead it holds a `CommandSink` — a lightweight, cloneable handle that queues timer commands (start, split, reset, etc.). The runtime drains the queue and applies the commands to the timer. This decoupling means hotkey events from a background thread never need to lock the timer directly.

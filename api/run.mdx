@@ -1,0 +1,265 @@
+---
+title: "Run API Reference"
+sidebarTitle: "Run"
+description: "Complete API reference for the Run type: creating, configuring, parsing, and saving runs. A Run stores all segment data, history, and metadata for one game/category."
+---
+
+## Overview
+
+A `Run` is the central data container in livesplit-core. It holds everything needed to describe a speedrun for a specific game and category: the list of segments, personal best split times, attempt history, comparison data, and associated metadata. Every timer is driven by a `Run` object.
+
+Runs can be created from scratch in code, or parsed from an existing splits file in any of the many supported formats (LiveSplit `.lss`, WSplit, SplitterZ, and more).
+
+---
+
+## Construction
+
+### `Run::new() -> Run`
+
+Creates a new, empty `Run` with no segments, no game/category name, and zero attempts.
+
+```rust
+let run = Run::new();
+```
+
+---
+
+### `composite::parse(source: &[u8], load_files_path: Option<&Path>) -> Result<ParsedRun>`
+
+Auto-detects the splits file format from raw bytes and parses it into a `Run`. The parser tries every supported format in order; if none matches, it returns an error.
+
+Pass `load_files_path` to allow the parser to load external files (such as segment icons stored next to the splits file). In server-side environments, pass `None`.
+
+```rust
+use livesplit_core::run::parser::composite;
+use std::path::Path;
+
+let data = std::fs::read("celeste.lss").unwrap();
+let parsed = composite::parse(&data, Some(Path::new("celeste.lss")))?;
+
+// Detect which format was used
+println!("Format: {}", parsed.kind);
+
+// Extract the Run
+let run = parsed.run;
+```
+
+The returned `ParsedRun` struct exposes:
+- `run: Run` — the parsed run object
+- `kind: TimerKind` — which parser was matched (e.g. `TimerKind::LiveSplit`)
+
+### `composite::parse_and_fix(source: &[u8], load_files_path: Option<&Path>) -> Result<ParsedRun>`
+
+Like `parse`, but also calls `run.fix_splits()` automatically after parsing. This repairs common issues such as decreasing times and missing segment information. Prefer this variant when loading files for display in a timer.
+
+---
+
+## Game & Category Info
+
+### `game_name(&self) -> &str`
+
+Returns the name of the game this run is for.
+
+### `set_game_name<S: Into<String>>(&mut self, name: S)`
+
+Sets the name of the game this run is for.
+
+### `category_name(&self) -> &str`
+
+Returns the name of the category.
+
+### `set_category_name<S: Into<String>>(&mut self, name: S)`
+
+Sets the name of the category.
+
+### `game_icon(&self) -> &Image`
+
+Returns the game icon image. If no icon is set, the data will be empty.
+
+### `set_game_icon(&mut self, image: Image)`
+
+Sets the game icon.
+
+### `extended_name(&self, use_extended_category_name: bool) -> Cow<'_, str>`
+
+Returns a display name combining the game and category names: `"Game Name - Category Name"`. If either is empty, the dash is omitted. When `use_extended_category_name` is `true`, speedrun.com variables are appended in parentheses.
+
+### `extended_file_name(&self, use_extended_category_name: bool) -> String`
+
+Like `extended_name`, but strips characters that are unsafe in file names. Useful for constructing a default save path.
+
+### `extended_category_name(&self, show_region: bool, show_platform: bool, show_variables: bool) -> impl Display`
+
+Returns an extended category name that may include region, platform, and speedrun.com variables depending on the boolean flags. Example output: `"Any% (No Tuner, JPN, Wii Emulator)"`.
+
+---
+
+## Segments
+
+### `push_segment(&mut self, segment: Segment)`
+
+Appends a segment to the end of the run's segment list.
+
+### `segments(&self) -> &[Segment]`
+
+Returns an immutable slice of all segments in the run.
+
+### `segments_mut(&mut self) -> &mut Vec<Segment>`
+
+Returns a mutable reference to the segments vector, allowing direct structural manipulation.
+
+### `segment(&self, index: usize) -> &Segment`
+
+Returns a reference to the segment at the given index. **Panics** if the index is out of bounds.
+
+### `segment_mut(&mut self, index: usize) -> &mut Segment`
+
+Returns a mutable reference to the segment at the given index. **Panics** if the index is out of bounds.
+
+### `len(&self) -> usize`
+
+Returns the number of segments in the run.
+
+### `is_empty(&self) -> bool`
+
+Returns `true` if the run contains no segments.
+
+---
+
+## Attempt History
+
+Each completed or reset attempt is recorded in the run's attempt history.
+
+### `attempt_count(&self) -> u32`
+
+Returns the total number of attempts that have been made with this run.
+
+### `set_attempt_count(&mut self, attempts: u32)`
+
+Sets the attempt counter directly. Note: this does not add or remove entries from the attempt history — it only changes the displayed count.
+
+### `attempt_history(&self) -> &[Attempt]`
+
+Returns the slice of all recorded `Attempt` entries. Each `Attempt` stores timing metadata for one full run attempt (start time, end time, pause time, etc.), but not individual segment times — those are stored per-segment in `SegmentHistory`.
+
+---
+
+## Offset (Start Delay)
+
+### `offset(&self) -> TimeSpan`
+
+Returns the timer offset — the time at which the timer starts counting when a new attempt begins. A positive offset delays the timer start (useful for runs that begin before an in-game timer). A negative offset causes the timer to start below zero.
+
+### `set_offset(&mut self, offset: TimeSpan)`
+
+Sets the timer offset.
+
+---
+
+## Comparisons
+
+Comparisons define a complete set of target split times across all segments. The built-in `"Personal Best"` comparison is always present; others (such as `"Best Segments"` or `"Average Segments"`) are generated automatically.
+
+### `custom_comparisons(&self) -> &[String]`
+
+Returns the list of custom comparison names. This includes `"Personal Best"` but not comparisons produced by generators.
+
+### `comparisons(&self) -> ComparisonsIter<'_>`
+
+Returns an iterator over all comparison names — both custom comparisons and those generated by the comparison generators.
+
+### `comparison_generators(&self) -> &[Box<dyn ComparisonGenerator>]`
+
+Returns the list of registered comparison generators (e.g. Best Segments, Worst Segments, Average Segments).
+
+### `regenerate_comparisons(&mut self)`
+
+Forces all registered comparison generators to recompute their times from the current segment history. Call this after bulk-editing segment history data.
+
+### `add_custom_comparison<S: Into<String>>(&mut self, comparison: S) -> Result<(), AddComparisonError>`
+
+Adds a new custom comparison. Returns an error if the name starts with `[Race]` or already exists.
+
+---
+
+## Modification Tracking
+
+### `mark_as_modified(&mut self)`
+
+Marks the run as having unsaved changes.
+
+### `mark_as_unmodified(&mut self)`
+
+Clears the modification flag.
+
+### `has_been_modified(&self) -> bool`
+
+Returns `true` if the run has been modified since it was last marked as unmodified.
+
+---
+
+## Metadata
+
+Additional metadata is stored in a `RunMetadata` struct accessible through:
+
+### `metadata(&self) -> &RunMetadata`
+
+Returns a reference to the run's metadata (speedrun.com run ID, platform, region, emulator flag, and custom variables). See the [RunMetadata API reference](/api/run-metadata) for details.
+
+### `metadata_mut(&mut self) -> &mut RunMetadata`
+
+Returns a mutable reference to the metadata.
+
+---
+
+## Saving
+
+### `run::saver::livesplit::save_run<W: fmt::Write>(run: &Run, writer: W) -> fmt::Result`
+
+Saves a run to the LiveSplit splits file format (`.lss`). The `writer` can be any type implementing `fmt::Write`, such as a `BufWriter<File>` wrapped in `IoWrite`.
+
+```rust
+use livesplit_core::run::saver::livesplit::{self, IoWrite};
+use std::fs::File;
+use std::io::BufWriter;
+
+let file = File::create("celeste.lss").unwrap();
+let writer = BufWriter::new(file);
+livesplit::save_run(&run, IoWrite(writer)).expect("Failed to save");
+```
+
+<Tip>
+If the run is actively in use by a `Timer`, call `save_timer` instead so the current in-progress attempt is also saved correctly.
+</Tip>
+
+---
+
+## Auto Splitter Settings
+
+### `auto_splitter_settings(&self) -> &str`
+
+Returns the auto splitter settings blob encoded as XML. These settings are stored verbatim in the splits file and are passed to the auto splitter at load time.
+
+---
+
+## Code Example
+
+```rust
+use livesplit_core::{Run, Segment};
+use livesplit_core::run::parser::composite;
+
+// Create from scratch
+let mut run = Run::new();
+run.set_game_name("Celeste");
+run.set_category_name("Any%");
+run.push_segment(Segment::new("Prologue"));
+run.push_segment(Segment::new("City"));
+
+println!("Segments: {}", run.len());
+
+// Parse from file bytes
+use std::path::Path;
+let data = std::fs::read("celeste.lss").unwrap();
+let parsed = composite::parse(&data, Some(Path::new("celeste.lss"))).unwrap();
+let run = parsed.run;
+```

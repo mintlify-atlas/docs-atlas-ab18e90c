@@ -1,0 +1,192 @@
+---
+title: "Building livesplit-core from Source"
+sidebarTitle: "Building"
+description: "Compile livesplit-core as a shared or static C library, generate language bindings, and download pre-built releases for your target platform."
+---
+
+This page covers everything you need to compile livesplit-core yourself: adding
+it to a Rust project, building the C API library, generating language bindings,
+understanding Cargo features, and finding pre-built releases.
+
+## Prerequisites
+
+- **Rust** — install the latest stable toolchain via [rustup.rs](https://rustup.rs/).
+- **Cargo** — included with every Rust installation.
+
+Verify your installation:
+
+```bash
+rustc --version
+cargo --version
+```
+
+No other system dependencies are required for a basic build. Some optional
+features (e.g. `font-loading` on Windows) pull in platform-specific system
+libraries automatically through their crate dependencies.
+
+---
+
+## Using livesplit-core as a Rust Dependency
+
+If you are writing a Rust application, you do not need to clone the repository.
+Simply add the crate to your `Cargo.toml`:
+
+```toml Cargo.toml
+[dependencies]
+livesplit-core = "0.13.0"
+```
+
+Then `cargo build` will fetch and compile everything. To enable optional
+features, list them explicitly:
+
+```toml Cargo.toml
+[dependencies]
+livesplit-core = { version = "0.13.0", features = ["software-rendering", "auto-splitting"] }
+```
+
+---
+
+## Building the C API
+
+The `livesplit-core-capi` workspace member exposes the full library surface
+through a C-compatible ABI. Build it when you need a shared (`.so` / `.dll` /
+`.dylib`) or static (`.a` / `.lib`) library to link against from C, C++, C#,
+Swift, or any other language.
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/LiveSplit/livesplit-core.git
+    cd livesplit-core
+    ```
+  </Step>
+
+  <Step title="Build both shared and static libraries">
+    This single command produces both a shared library and a static library in
+    one pass:
+
+    ```bash
+    cargo build --release -p livesplit-core-capi
+    ```
+  </Step>
+
+  <Step title="Build only the shared library">
+    If you only need a dynamically linked library (`.so`, `.dll`, or
+    `.dylib`), use:
+
+    ```bash
+    cargo rustc --release -p livesplit-core-capi --crate-type cdylib
+    ```
+  </Step>
+
+  <Step title="Build only the static library">
+    If you only need a statically linked archive (`.a` or `.lib`), use:
+
+    ```bash
+    cargo rustc --release -p livesplit-core-capi --crate-type staticlib
+    ```
+  </Step>
+
+  <Step title="Locate the output">
+    After any of the commands above, the compiled library is placed in:
+
+    ```
+    target/release/
+    ```
+
+    The exact filename depends on your host operating system:
+
+    | Platform | Shared library | Static library |
+    |---|---|---|
+    | Linux | `liblivesplit_core.so` | `liblivesplit_core.a` |
+    | macOS | `liblivesplit_core.dylib` | `liblivesplit_core.a` |
+    | Windows | `livesplit_core.dll` | `livesplit_core.lib` |
+  </Step>
+</Steps>
+
+---
+
+## Generating Language Bindings
+
+livesplit-core ships a code-generation tool in `capi/bind_gen` that reads the C
+API and emits idiomatic bindings for every supported target language.
+
+```bash
+cd capi/bind_gen
+cargo run
+```
+
+The generated files are written to `capi/bindings/` and cover the following
+languages out of the box:
+
+| Language | Notes |
+|---|---|
+| **C** | Plain C header (`livesplit_core.h`) |
+| **C#** | P/Invoke wrapper classes |
+| **Java (JNA)** | Java Native Access interface |
+| **Java (JNI)** | Java Native Interface variant |
+| **Kotlin** | Kotlin JNI variant |
+| **Swift** | Swift module map and wrappers |
+| **Ruby** | Ruby FFI bindings |
+| **Python** | Python ctypes bindings |
+| **TypeScript (Node.js)** | TypeScript declarations for the native addon |
+| **WebAssembly** | TypeScript declarations for the WASM package |
+
+Regenerate bindings any time you update the C API source, then commit the
+generated files alongside the rest of your project.
+
+---
+
+## Cargo Features
+
+livesplit-core uses Cargo feature flags to keep the binary size small on
+resource-constrained targets and to avoid pulling in heavy optional
+dependencies. The table below lists the most important flags:
+
+| Feature | Default | Description |
+|---|---|---|
+| `std` | ✅ | Enables Rust standard library support. Disable for `no_std` targets such as bare-metal ARM or RISC-V. |
+| `image-shrinking` | ✅ | Automatically resizes large images embedded in runs to reduce memory usage. Implies `std` and `more-image-formats`. |
+| `localization` | ✅ | Enables localisation of built-in component labels. |
+| `auto-splitting` | ❌ | Enables the WebAssembly auto splitter runtime (`livesplit-auto-splitting`). Requires `std`. |
+| `software-rendering` | ❌ | Enables the CPU-based renderer powered by [tiny-skia](https://github.com/RazrFalcon/tiny-skia). Useful for headless or embedded environments. |
+| `svg-rendering` | ❌ | Enables the SVG layout renderer. |
+| `font-loading` | ❌ | Enables system font discovery and loading. Requires `std` and `default-text-engine`. |
+| `web-rendering` | ❌ | Enables the WebAssembly Canvas-based renderer for browser environments. Implies `wasm-web`. |
+| `wasm-web` | ❌ | Enables wasm-bindgen integration for `wasm32-unknown-unknown` targets. |
+| `therun-gg` | ❌ | Enables live race data integration with [therun.gg](https://therun.gg) via HTTP (uses `reqwest` + `rustls`). |
+
+To enable a feature, add it to your dependency declaration:
+
+```toml Cargo.toml
+[dependencies]
+livesplit-core = { version = "0.13.0", features = ["software-rendering", "auto-splitting"] }
+```
+
+To build with no default features (useful for `no_std` targets), disable them
+explicitly:
+
+```toml Cargo.toml
+[dependencies]
+livesplit-core = { version = "0.13.0", default-features = false }
+```
+
+---
+
+## Pre-built Releases
+
+Pre-compiled binaries for the most common target platforms are available on the
+GitHub Releases page:
+
+➡ **[https://github.com/LiveSplit/livesplit-core/releases](https://github.com/LiveSplit/livesplit-core/releases)**
+
+Each release includes shared and static libraries for Windows (x86, x86\_64,
+ARM64), macOS (x86\_64, Apple Silicon), Linux (x86\_64 and common variants),
+Android, iOS, and WebAssembly, along with the generated language bindings for
+all supported languages.
+
+<Note>
+  Pre-built releases cover the most common targets. If you need a custom target
+  (e.g. a specific musl variant, bare-metal architecture, or a non-default
+  feature set), build from source using the instructions above.
+</Note>

@@ -1,0 +1,187 @@
+---
+title: "Timer: Controlling Speedrun Attempts"
+sidebarTitle: "Timer"
+description: "The Timer wraps a Run and exposes all controls for a speedrun attempt: start, split, pause, reset, game time, and more. Understand TimerPhase and timing methods."
+---
+
+## The `Timer` Struct
+
+`Timer` is the central coordinator for an active speedrun attempt. It wraps a `Run` and adds all the state machinery needed to track an in-progress run: the current split index, pause state, game time initialization, loading times, and the current comparison and timing method.
+
+```rust
+use livesplit_core::{Run, Segment, Timer, TimerPhase};
+
+// Build the run
+let mut run = Run::new();
+run.set_game_name("Super Mario Odyssey");
+run.set_category_name("Any%");
+run.push_segment(Segment::new("Cap Kingdom"));
+run.push_segment(Segment::new("Cascade Kingdom"));
+
+// Create the timer (fails only if the run has no segments)
+let mut timer = Timer::new(run).expect("Run must have at least one segment");
+
+// Start an attempt
+timer.start().unwrap();
+assert_eq!(timer.current_phase(), TimerPhase::Running);
+
+// Split at the end of Cap Kingdom
+timer.split().unwrap();
+
+// The last split ends the run
+assert_eq!(timer.current_phase(), TimerPhase::Ended);
+
+// Reset and save the attempt to history
+timer.reset(true).unwrap();
+assert_eq!(timer.current_phase(), TimerPhase::NotRunning);
+```
+
+When `Timer::new` is called it automatically runs `fix_splits` and `regenerate_comparisons` on the run, so the comparison data is always consistent from the start.
+
+---
+
+## `TimerPhase`
+
+`TimerPhase` describes the lifecycle state of the timer at any point in time. Query it with `timer.current_phase()`.
+
+| Variant | Meaning |
+|---|---|
+| `NotRunning` | No attempt is in progress. The timer is idle. |
+| `Running` | An attempt is active and the clock is counting. |
+| `Paused` | An attempt is active but the clock has been paused by the runner. |
+| `Ended` | The last split has been recorded and the attempt is over, but the timer has not been reset yet. |
+
+The `Ended` phase is distinct from `NotRunning` — it gives the runner a chance to review the result or undo the final split before committing. Calling `reset(true)` saves the attempt into history; `reset(false)` discards it.
+
+---
+
+## `TimingMethod`
+
+livesplit-core supports two independent timing methods, selectable at any time with `timer.set_current_timing_method(method)`:
+
+| Variant | Description |
+|---|---|
+| `RealTime` | Unmodified wall-clock time, as close to an atomic clock as possible. Always available; requires no special setup. |
+| `GameTime` | Time provided by the game itself, typically real time minus loading screens. Must be explicitly initialized for each attempt and updated by the integration code. |
+
+The active method determines which time column is used when evaluating comparisons and is stored on the timer. Toggle between them with `timer.toggle_timing_method()`.
+
+---
+
+## Key Operations
+
+| Method | Description |
+|---|---|
+| `timer.start()` | Starts a new attempt. Returns an error if an attempt is already running. |
+| `timer.split()` | Records the current time as the split time for the current segment. Ends the attempt on the final segment. |
+| `timer.split_or_start()` | Calls `start()` if not running, otherwise calls `split()`. Convenient for a single hotkey. |
+| `timer.skip_split()` | Skips the current split without recording a time. Not allowed on the last split. |
+| `timer.undo_split()` | Removes the time from the most recent split and returns to it. Also works when the run has `Ended`. |
+| `timer.pause()` | Pauses a running attempt. |
+| `timer.resume()` | Resumes a paused attempt. |
+| `timer.toggle_pause()` | Toggles between `Running` and `Paused`. |
+| `timer.toggle_pause_or_start()` | Toggles pause if running, or starts if not running. |
+| `timer.undo_all_pauses()` | Removes all accumulated pause time. If paused, also resumes. |
+| `timer.reset(update_splits)` | Ends the attempt. If `update_splits` is `true`, stores the attempt in the run's history and updates comparisons. |
+| `timer.reset_and_set_attempt_as_pb()` | Resets and additionally promotes the current attempt to the Personal Best. |
+
+---
+
+## Game Time Workflow
+
+Game Time lets you display a time sourced from the game process rather than the system clock — typically real time with loading screens subtracted. It must be initialized for each new attempt because it starts uninitialized by default.
+
+```rust
+// Enable game time tracking for the current attempt
+timer.initialize_game_time().unwrap();
+
+// Option A: set the game time directly from a value your hook reads
+use livesplit_core::TimeSpan;
+let game_time = TimeSpan::from_seconds(123.456);
+timer.set_game_time(game_time).unwrap();
+
+// Option B: tell the timer how much time was spent loading;
+// game time is then computed as real_time - loading_times automatically
+let loading_time = TimeSpan::from_seconds(5.0);
+timer.set_loading_times(loading_time).unwrap();
+```
+
+Additional game time controls:
+
+| Method | Description |
+|---|---|
+| `timer.initialize_game_time()` | Enables game time for the current attempt. Must be called once per attempt before any game time updates. |
+| `timer.deinitialize_game_time()` | Disables game time for the current attempt. |
+| `timer.is_game_time_initialized()` | Returns `true` if game time is active. |
+| `timer.pause_game_time()` | Freezes the game clock (e.g. during a loading screen). |
+| `timer.resume_game_time()` | Resumes the game clock after a loading screen. |
+| `timer.is_game_time_paused()` | Returns `true` if the game clock is frozen. |
+| `timer.set_game_time(t)` | Sets the game time to `t`. Works even when the game clock is paused. |
+| `timer.set_loading_times(t)` | Sets accumulated loading time. Game time = real time − loading times. |
+| `timer.loading_times()` | Returns the current accumulated loading time. |
+
+---
+
+## Custom Variables
+
+Custom variables are key-value strings associated with the run. When a split is recorded, the current set of custom variables is snapshotted onto that segment. Variables marked as *permanent* are stored in the splits file; temporary ones live only for the current session and are typically set by auto splitters.
+
+```rust
+// Set a custom variable (creates a temporary one if it doesn't exist)
+timer.set_custom_variable("Boss Rush", "true");
+```
+
+---
+
+## Comparisons
+
+The timer always compares the current attempt against one active comparison. By default this is `Personal Best`.
+
+```rust
+use livesplit_core::comparison::best_segments;
+
+// Advance to the next comparison in the list
+timer.switch_to_next_comparison();
+
+// Go back to the previous comparison
+timer.switch_to_previous_comparison();
+
+// Jump directly to a named comparison
+timer.set_current_comparison(best_segments::NAME).unwrap();
+
+// Read the active comparison name
+println!("Comparing against: {}", timer.current_comparison());
+```
+
+---
+
+## `SharedTimer`
+
+For multi-threaded applications (e.g. a UI thread plus an auto-splitter thread), the timer can be wrapped in an `Arc<RwLock<Timer>>` called a `SharedTimer`:
+
+```rust
+// Consume the timer and wrap it for shared ownership
+let shared = timer.into_shared();
+
+// In another thread
+let mut t = shared.write().unwrap();
+t.split_or_start().ok();
+```
+
+`SharedTimer` is only available when the `std` feature is enabled (the default for most targets).
+
+---
+
+## Snapshots
+
+A `Snapshot` is a point-in-time, read-only view of the timer that freezes the current time at the moment of creation. Components and layouts always operate on snapshots so that the displayed time doesn't change mid-render.
+
+```rust
+// Take a snapshot for rendering
+let snapshot = timer.snapshot();
+
+// current_time() returns the frozen Time (real + game)
+let time = snapshot.current_time();
+```
+
+The snapshot derefs to `&Timer`, so all read-only timer methods are available through it.

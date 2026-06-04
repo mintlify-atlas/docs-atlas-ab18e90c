@@ -1,0 +1,183 @@
+---
+title: "Using livesplit-core from JavaScript and WebAssembly"
+sidebarTitle: "JS / WASM"
+description: "Use livesplit-core in Node.js via the TypeScript FFI binding or in web browsers as a WebAssembly module with wasm-bindgen-generated JavaScript glue."
+---
+
+livesplit-core supports two JavaScript delivery modes:
+
+| Mode | File | Entry point | Target |
+|---|---|---|---|
+| **Node.js** | `capi/bindings/node/livesplit_core.js` (+ `.ts`) | FFI to native `.so`/`.dll`/`.dylib` | Server-side Node.js |
+| **WebAssembly** | `capi/bindings/wasm_bindgen/` | WASM module | Browsers, Deno, Node.js |
+
+Both modes expose the same high-level class API. The generated files include a `.js` version
+(with JSDoc comments) and a `.ts` version with full TypeScript type declarations.
+
+<Tabs>
+  <Tab title="Node.js">
+
+### Overview
+
+The Node.js binding uses FFI to load the native `livesplit_core` shared library at runtime.
+The generated `livesplit_core.js` / `livesplit_core.ts` files declare every function using
+FFI type descriptors such as `'pointer'`, `'uint32'`, and `'CString'`.
+
+### npm package
+
+The binding is published as the
+[`livesplit-core`](https://www.npmjs.com/package/livesplit-core) npm package.
+
+### Class structure
+
+Each livesplit-core type has three classes:
+
+- `TimerRef` — shared borrow; exposes read-only methods
+- `TimerRefMut extends TimerRef` — mutable borrow; exposes mutating methods
+- `Timer extends TimerRefMut` — owned; adds `dispose()` which calls the native drop function
+
+Calling `dispose()` on an owned object sets the internal `ptr` to null and calls the native
+drop function. Any subsequent call on the disposed object throws `"{name} is disposed"`.
+
+### Naming conventions
+
+Rust method names are converted to `lowerCamelCase`. Nullable factory methods return `T |
+null`. The method `new` (when nullable in Rust) stays as `new` in JavaScript since it is a
+valid static method name.
+
+### TypeScript example
+
+```typescript
+import * as LiveSplitCore from 'livesplit-core';
+
+// Run_new is non-nullable → static new() returns Run (never null)
+const run = LiveSplitCore.Run.new();
+run.setGameName('Sonic Mania');
+run.setCategoryName('Mania Mode');
+run.pushSegment(LiveSplitCore.Segment.new('Green Hill Zone'));
+
+// Timer_new is nullable → static new() returns Timer | null
+const timer = LiveSplitCore.Timer.new(run)!;
+timer.start();
+timer.split();
+timer.reset(true); // true = update splits
+
+// Free native memory
+timer.dispose();
+```
+
+### JavaScript example
+
+```javascript
+const LiveSplitCore = require('livesplit-core');
+
+const run = LiveSplitCore.Run.new();
+run.setGameName('Sonic Mania');
+run.setCategoryName('Mania Mode');
+run.pushSegment(LiveSplitCore.Segment.new('Green Hill Zone'));
+
+const timer = LiveSplitCore.Timer.new(run);
+if (!timer) throw new Error('Run must have at least one segment');
+
+timer.start();
+timer.split();
+timer.reset(true);
+timer.dispose();
+```
+
+  </Tab>
+  <Tab title="WebAssembly">
+
+### Overview
+
+The WebAssembly binding is built with **wasm-bindgen** and compiled from the
+`livesplit-core` crate with the `wasm32-unknown-unknown` target. The binding generator
+produces JavaScript/TypeScript glue code in two variants:
+
+| Variant | Path | Entry point |
+|---|---|---|
+| **Bundler** | `wasm_bindgen/bundler/` | Designed for webpack, Rollup, Vite |
+| **Web** | `wasm_bindgen/web/` | Designed for direct `<script type="module">` use |
+
+Both variants expose identical classes; only the WASM initialization path differs.
+
+### Class structure
+
+Each type has three exported classes:
+
+- `TimerRef` — shared borrow (read-only methods)
+- `TimerRefMut extends TimerRef` — mutable borrow
+- `Timer extends TimerRefMut` — owned; exposes `[Symbol.dispose]()` for explicit cleanup
+
+The owned class uses `[Symbol.dispose]()` (the TC39 Explicit Resource Management protocol)
+so it works with the `using` declaration in environments that support it.
+
+### Web example (ES module)
+
+```javascript
+import init, * as LiveSplitCore from './livesplit_core.js';
+
+// Initialize the WASM binary before calling anything else
+await init();
+
+const run = LiveSplitCore.Run.new();
+run.setGameName('Celeste');
+run.setCategoryName('Any%');
+run.pushSegment(LiveSplitCore.Segment.new('Prologue'));
+
+const timer = LiveSplitCore.Timer.new(run);
+if (!timer) throw new Error('Run must have at least one segment');
+
+timer.start();
+timer.split();
+timer.reset(true);
+
+// Release WASM memory
+timer[Symbol.dispose]();
+```
+
+### TypeScript (bundler) example
+
+```typescript
+import init, * as LiveSplitCore from './livesplit_core.js';
+
+await init();
+
+const run = LiveSplitCore.Run.new();
+run.setGameName('Celeste');
+run.setCategoryName('Any%');
+run.pushSegment(LiveSplitCore.Segment.new('Prologue'));
+
+// using declaration calls [Symbol.dispose]() automatically at end of scope
+using timer = LiveSplitCore.Timer.new(run)!;
+timer.start();
+timer.split();
+timer.reset(true);
+```
+
+### Preloading the WASM binary
+
+The `wasm_bindgen/web/` directory includes a `preload.js` / `preload.ts` helper that lets
+you fetch and compile the WASM binary in advance so the main module initializes instantly:
+
+```javascript
+import { preload } from './preload.js';
+const precompiled = await preload(); // fetch + compile happens here
+
+import init, * as LiveSplitCore from './livesplit_core.js';
+await init({ module_or_path: precompiled }); // no network request
+```
+
+<Note>
+  WASM memory is managed by the WASM linear memory allocator, not by the JavaScript garbage
+  collector. Call `[Symbol.dispose]()` (or use the `using` declaration) on every owned object
+  when you are finished with it. Forgetting to do so leaks WASM heap memory for the lifetime
+  of the page.
+</Note>
+
+### Documentation
+
+Full TypeScript API reference: [https://livesplit.org/livesplit-core-docs/](https://livesplit.org/livesplit-core-docs/)
+
+  </Tab>
+</Tabs>

@@ -1,0 +1,149 @@
+---
+title: "Runs and Segments: The Core Data Model"
+sidebarTitle: "Runs & Segments"
+description: "A Run stores the game name, category, segment list, attempt history, comparison generators, and run metadata. Segments hold split times and best segment times."
+---
+
+## What Is a `Run`?
+
+A `Run` is the top-level data container for one game-and-category combination. It holds everything needed to describe a speedrun: the game name, category name, the list of splits, every past attempt, the active comparison generators, and auxiliary metadata. Almost every other API in livesplit-core ultimately reads from or writes to a `Run`.
+
+```rust
+use livesplit_core::{Run, Segment};
+
+let mut run = Run::new();
+run.set_game_name("Hollow Knight");
+run.set_category_name("Any%");
+run.set_attempt_count(42);
+
+// Add segments
+run.push_segment(Segment::new("Forgotten Crossroads"));
+run.push_segment(Segment::new("Greenpath"));
+run.push_segment(Segment::new("Fungal Wastes"));
+```
+
+### Key Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `game_name` | `String` | The name of the game being run. |
+| `category_name` | `String` | The name of the category (e.g. "Any%", "100%"). |
+| `attempt_count` | `u32` | Total number of attempts started with these splits. |
+| `attempt_history` | `Vec<Attempt>` | Metadata for every past attempt (start time, end time, pause time, final time). Does **not** store per-segment times — those live inside each `Segment`. |
+| `offset` | `TimeSpan` | A start delay (negative value) or countdown. When the timer starts, it counts up from this offset. |
+| `game_icon` | `Image` | An optional icon for the game. |
+
+### Accessing Segments
+
+```rust
+// Slice of all segments
+let segs = run.segments();
+
+// Single segment by index (panics if out of bounds)
+let first = run.segment(0);
+
+// Mutable access
+let first_mut = run.segment_mut(0);
+
+// Total number of segments
+let count = run.len();
+```
+
+---
+
+## What Is a `Segment`?
+
+A `Segment` represents one split point in a speedrun — a named checkpoint where the runner records a time. Each segment carries:
+
+- **`name`** — a human-readable label (e.g. `"Greenpath"`).
+- **`split_time`** — the cumulative time at which the runner hit this split during the *current* attempt. This is a `Time` struct containing an optional real-time and an optional game-time field.
+- **Personal Best split time** — the best *cumulative* time ever recorded at this split. Retrieved with `segment.personal_best_split_time()`.
+- **`best_segment_time`** — the fastest *segment* (lap) time ever recorded between the previous split and this one. Retrieved with `segment.best_segment_time()`.
+- **`segment_history`** — a `SegmentHistory` map of past segment times, keyed by attempt index. Used by comparison generators to compute averages, medians, etc.
+- **comparison times** — a map from comparison name → `Time`. Both built-in generated comparisons and user-defined custom comparisons store their split times here, accessible via `segment.comparison(name)`.
+- **`icon`** — an optional `Image` icon for the segment.
+- **`variables`** — a `HashMap<String, String>` of per-attempt segment variables, populated at split time from the run's custom variables.
+
+```rust
+use livesplit_core::{Segment, Time, TimeSpan};
+
+let mut segment = Segment::new("Metro Kingdom");
+
+// Set the Personal Best split time
+let time = Time::new().with_real_time(Some(TimeSpan::from_seconds(234.0)));
+segment.set_personal_best_split_time(time);
+
+// Read the best segment time
+let best = segment.best_segment_time();
+```
+
+---
+
+## `RunMetadata`
+
+`RunMetadata` stores optional supplementary information about the run, accessible via `run.metadata()` (or `run.metadata_mut()` for mutation).
+
+| Field | Description |
+|---|---|
+| `run_id` | The speedrun.com run ID linking this run to a verified record. Call `run.clear_run_id()` when the Personal Best changes and the association is no longer valid. |
+| `platform_name` | The platform the game is played on (e.g. `"Nintendo Switch"`). |
+| `uses_emulator` | Whether the run is on an emulator. Note: `false` may simply mean this is unknown. |
+| `region_name` | The game region (e.g. `"JPN"`, `"USA"`). |
+| `speedrun_com_variables` | Key-value pairs corresponding to speedrun.com category variables (e.g. `"Amiibos" → "No"`). |
+| `custom_variables` | Arbitrary key-value pairs (`CustomVariable`) that are independent of speedrun.com. May be **permanent** (saved to the splits file) or **temporary** (set at runtime by an auto splitter). |
+
+```rust
+let meta = run.metadata_mut();
+meta.set_platform_name("PC");
+meta.set_region_name("USA");
+meta.set_emulator_usage(false);
+
+// Attach a speedrun.com variable
+meta.set_speedrun_com_variable("Glitches", "No Major Glitches");
+
+// Attach a permanent custom variable
+meta.custom_variable_mut("Character").permanent().set_value("Hornet");
+```
+
+---
+
+## Comparison Generators
+
+A `Run` stores a list of `ComparisonGenerator` objects that automatically recompute derived comparison times after every attempt. By default a new `Run` is created with the full set of default generators:
+
+```
+Best Segments, Best Split Times, Average Segments, Median Segments,
+Worst Segments, Balanced PB, Latest Run, None
+```
+
+These are stored in `run.comparison_generators()`. You can inspect or replace them via `run.comparison_generators_mut()`. After any change to segment history (e.g. at the end of an attempt), call:
+
+```rust
+run.regenerate_comparisons();
+```
+
+The `Timer` does this automatically when an attempt is reset, so you usually don't need to call it manually.
+
+Custom, hand-authored comparisons (like a secondary goal split set) are stored separately in `run.custom_comparisons()`. The `Personal Best` comparison is always the first entry and cannot be removed. Custom comparisons may not begin with the prefix `[Race]` — that prefix is reserved for race integrations.
+
+---
+
+## Saving to LSS
+
+livesplit-core can save a `Run` to the LiveSplit Splits (`.lss`) XML format using `run::saver::livesplit::save_run`:
+
+```rust
+use livesplit_core::run::saver::livesplit::{self, IoWrite};
+use livesplit_core::{Run, Segment};
+use std::fs::File;
+use std::io::BufWriter;
+
+let file = File::create("hollow_knight_any.lss").expect("Failed creating file");
+let writer = BufWriter::new(file);
+
+livesplit::save_run(&run, IoWrite(writer)).expect("Failed saving splits");
+```
+
+<Tip>
+To load an existing splits file instead of building a `Run` from scratch, see the [Parsing Splits](/guides/parsing-splits) guide.
+</Tip>

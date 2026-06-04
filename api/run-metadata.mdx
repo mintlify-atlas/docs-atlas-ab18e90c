@@ -1,0 +1,200 @@
+---
+title: "RunMetadata API Reference"
+sidebarTitle: "RunMetadata"
+description: "RunMetadata stores speedrun.com category variables, platform, region, and custom user-defined variables associated with a Run."
+---
+
+## Overview
+
+`RunMetadata` stores optional supplementary information about a run. It is embedded in every `Run` object and is saved to / loaded from the splits file automatically. All fields are optional and may be empty.
+
+Metadata covers:
+- The **speedrun.com run ID** linking this run to a record on speedrun.com
+- The **platform** and **region** of the game
+- Whether an **emulator** is used
+- **speedrun.com category variables** (structured key-value pairs tied to a category, e.g. subcategory choices like "Yes Amiibos" vs "No Amiibos")
+- **Custom variables** — arbitrary user-defined or auto-splitter-defined key-value pairs
+
+Access metadata from a run via:
+
+```rust
+let metadata = run.metadata();         // &RunMetadata
+let metadata = run.metadata_mut();     // &mut RunMetadata
+```
+
+---
+
+## speedrun.com Run ID
+
+### `run_id(&self) -> &str`
+
+Returns the speedrun.com run ID associated with this run. This ID links the run to a specific record on speedrun.com. Returns an empty string if no association exists.
+
+```rust
+println!("Run ID: {}", metadata.run_id());
+```
+
+### `set_run_id<S: PopulateString>(&mut self, id: S)`
+
+Sets the speedrun.com run ID. You should update this when the Personal Best changes so it stays in sync with the correct speedrun.com record.
+
+```rust
+metadata.set_run_id("abc123xyz");
+```
+
+---
+
+## Platform
+
+### `platform_name(&self) -> &str`
+
+Returns the name of the platform the game is run on (e.g. `"Nintendo Switch"`, `"PC"`). Returns an empty string if not specified.
+
+### `set_platform_name<S: PopulateString>(&mut self, name: S)`
+
+Sets the platform name.
+
+---
+
+## Region
+
+### `region_name(&self) -> &str`
+
+Returns the region of the game (e.g. `"JPN"`, `"USA"`). Returns an empty string if not specified.
+
+### `set_region_name<S: PopulateString>(&mut self, name: S)`
+
+Sets the region name.
+
+---
+
+## Emulator Usage
+
+### `uses_emulator(&self) -> bool`
+
+Returns `true` if this run is performed on an emulator. Note that `false` may mean either "not on emulator" or "unknown" — the flag cannot distinguish these two cases.
+
+### `set_emulator_usage(&mut self, uses_emulator: bool)`
+
+Sets the emulator flag. Keep in mind that `false` may also be interpreted as "information not known".
+
+---
+
+## speedrun.com Variables
+
+speedrun.com variables are category-level key-value pairs that correspond to specific options defined on speedrun.com — for example, whether Amiibos are used, or which difficulty was selected. They are stored under their speedrun.com variable name.
+
+### `speedrun_com_variables(&self) -> Iter<'_, String>`
+
+Returns an iterator over all speedrun.com variables as `(&str, &str)` pairs of `(name, value)`.
+
+```rust
+for (name, value) in metadata.speedrun_com_variables() {
+    println!("{}: {}", name, value);
+}
+```
+
+### `set_speedrun_com_variable<N, V>(&mut self, name: N, value: V)`
+
+Sets a speedrun.com variable. If it does not yet exist, it is inserted. If it already exists, its value is updated.
+
+```rust
+metadata.set_speedrun_com_variable("Amiibos", "No Amiibos");
+```
+
+### `remove_speedrun_com_variable(&mut self, name: &str)`
+
+Removes the speedrun.com variable with the given name. Does nothing if the variable does not exist.
+
+---
+
+## Custom Variables
+
+Custom variables are user-defined or auto-splitter-defined key-value string pairs. Unlike speedrun.com variables, they are not tied to any external schema.
+
+There are two kinds:
+
+- **Permanent** variables: defined by the runner in the run editor, stored in the splits file, and shown in the UI.
+- **Temporary** variables: set programmatically (e.g. by an auto splitter) at runtime. They are **not** stored in the splits file and are not shown in the editor.
+
+### `CustomVariable` fields
+
+```rust
+pub struct CustomVariable {
+    pub value: String,
+    pub is_permanent: bool,
+}
+```
+
+### `custom_variables(&self) -> Iter<'_, CustomVariable>`
+
+Returns an iterator over all custom variables (both permanent and temporary) as `(&str, &CustomVariable)` pairs of `(name, variable)`.
+
+```rust
+for (name, var) in metadata.custom_variables() {
+    println!("{}: {} (permanent: {})", name, var.value, var.is_permanent);
+}
+```
+
+### `custom_variable(&self, name: &str) -> Option<&CustomVariable>`
+
+Returns the custom variable with the given name if it exists.
+
+### `custom_variable_value(&self, name: &str) -> Option<&str>`
+
+Returns just the value string of the named custom variable, or `None` if it does not exist.
+
+```rust
+if let Some(ver) = metadata.custom_variable_value("game_version") {
+    println!("Version: {}", ver);
+}
+```
+
+### `custom_variable_mut<S: PopulateString>(&mut self, name: S) -> &mut CustomVariable`
+
+Returns a mutable reference to the named custom variable. If it does not exist, it is created as a **temporary** variable. To make it permanent, call `.permanent()` on the returned reference.
+
+```rust
+// Set a temporary variable (e.g. from an auto splitter)
+metadata.custom_variable_mut("room_count").set_value("42");
+
+// Create a permanent variable
+metadata.custom_variable_mut("notes").permanent().set_value("WR pace at split 3");
+```
+
+### `remove_custom_variable(&mut self, name: &str)`
+
+Removes the custom variable with the given name. Does nothing if it does not exist.
+
+### `clear(&mut self)`
+
+Resets all metadata: clears the run ID, platform name, region name, emulator flag, all speedrun.com variables, and all custom variables.
+
+---
+
+## Code Example
+
+```rust
+let metadata = run.metadata();
+
+// Print all speedrun.com variables
+for (name, value) in metadata.speedrun_com_variables() {
+    println!("{}: {}", name, value);
+}
+
+// Check platform
+println!("Platform: {}", metadata.platform_name());
+println!("Emulator: {}", metadata.uses_emulator());
+```
+
+Mutating metadata:
+
+```rust
+let metadata = run.metadata_mut();
+
+metadata.set_platform_name("PC");
+metadata.set_region_name("USA");
+metadata.set_emulator_usage(false);
+metadata.set_speedrun_com_variable("Category Extension", "No OOB");
+metadata.set_run_id("yz9q3m12");
+```

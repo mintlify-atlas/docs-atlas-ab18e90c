@@ -1,0 +1,310 @@
+---
+title: "RunEditor API Reference"
+sidebarTitle: "RunEditor"
+description: "The RunEditor provides a safe way to modify a Run, maintaining all invariants while segments are added, removed, reordered, and times are edited."
+---
+
+## Overview
+
+`RunEditor` (exported as `run::Editor` and re-exported as `RunEditor` from the crate root) is the safe, validated interface for making changes to a `Run`. Rather than mutating a `Run` directly — which can leave it in an inconsistent state — you open a `RunEditor`, make changes through its methods, and then close it to retrieve the updated `Run`.
+
+The editor enforces invariants such as:
+- At least one segment must always exist
+- Segment times remain consistent after insertions, deletions, and reorders
+- Attempt history and segment histories stay coherent
+
+The editor also tracks a **selected set of segments** and an **active segment** (the one currently being edited), which mirrors a typical split editor UI.
+
+---
+
+## Construction & Teardown
+
+### `RunEditor::new(run: Run) -> Result<RunEditor, OpenError>`
+
+Opens a `RunEditor` for the given `Run`. Automatically calls `fix_splits()` on the run before opening.
+
+**Fails** (`Err(OpenError::EmptyRun)`) if the run contains no segments, since a valid run must always have at least one segment. In that case the original `Run` is accessible via the `Err` variant... but note that in the C API / Rust API this returns `Result<Self, OpenError>` — you cannot recover the run from the error directly; add a segment first.
+
+```rust
+use livesplit_core::{Run, Segment, run::Editor as RunEditor};
+
+let mut run = Run::new();
+run.push_segment(Segment::new("Level 1"));
+
+let mut editor = RunEditor::new(run).expect("Run must have segments");
+```
+
+### `RunEditor::close(self) -> Run`
+
+Consumes the editor and returns the modified `Run`. To cancel all changes, simply drop the returned `Run` (or keep the original run before opening the editor).
+
+```rust
+let run = editor.close();
+```
+
+---
+
+## State & UI Rendering
+
+### `state(&self, image_cache: &mut ImageCache, lang: Lang) -> State`
+
+Computes and returns a `State` snapshot — a serializable view of the editor's current state suitable for driving any UI (segment names, times, selection flags, button availability, etc.). The `image_cache` is used to track image changes efficiently.
+
+### `state_as_json(&self, image_cache: &mut ImageCache, lang: Lang) -> String` *(C API)*
+
+Serializes the state to a JSON string. Useful for language bindings or web interfaces.
+
+---
+
+## Timing Method
+
+### `select_timing_method(&mut self, method: TimingMethod)`
+
+Switches the timing method being edited (Real Time or Game Time). All time fields in the editor operate on the selected method.
+
+### `selected_timing_method(&self) -> TimingMethod`
+
+Returns the currently selected timing method.
+
+---
+
+## Segment Selection
+
+The editor maintains a set of selected segments plus one **active segment** (the one whose fields are currently editable). All "active segment" edit operations apply to the active segment.
+
+### `select_only(&mut self, index: usize)`
+
+Selects only the segment at `index`, deselecting all others. The segment also becomes the active segment. **Panics** if `index` is out of bounds.
+
+### `select_additionally(&mut self, index: usize)`
+
+Adds the segment at `index` to the current selection and makes it the active segment. **Panics** if `index` is out of bounds.
+
+### `select_range(&mut self, index: usize)`
+
+Extends the selection from the currently active segment to `index`. The segment at `index` becomes the new active segment. **Panics** if `index` is out of bounds.
+
+### `unselect(&mut self, index: usize)`
+
+Removes the segment at `index` from the selection. Does nothing if the index is out of bounds or not selected. The segment will **not** be deselected if it is the only selected segment. If the active segment is deselected, the most recently selected remaining segment becomes active.
+
+### `select_all()`  *(available via `select_range` over the full range)*
+
+Use `select_range` from index 0 to the last segment index to select all.
+
+---
+
+## Segment Manipulation
+
+These operations affect the segment list and automatically update attempt history and segment histories to stay consistent.
+
+### `insert_segment_above(&mut self)`
+
+Inserts a new blank segment immediately above the active segment. The new segment becomes the only selected segment and the active segment.
+
+### `insert_segment_below(&mut self)`
+
+Inserts a new blank segment immediately below the active segment. The new segment becomes the only selected segment and the active segment.
+
+### `remove_segments(&mut self)`
+
+Removes all currently selected segments. If all segments are selected, nothing is removed (the run must always have at least one segment). After removal, the next unremoved segment below the active segment becomes active, falling back to the next one above if none exists.
+
+### `move_segments_up(&mut self)`
+
+Moves all selected segments up by one position. Does nothing if the first segment is selected. The active segment remains active.
+
+### `move_segments_down(&mut self)`
+
+Moves all selected segments down by one position. Does nothing if the last segment is selected. The active segment remains active.
+
+### `can_remove_segments(&self) -> bool`
+
+Returns `true` if the current selection can be removed (i.e. not all segments are selected).
+
+### `can_move_segments_up(&self) -> bool`
+
+Returns `true` if moving selected segments up is possible.
+
+### `can_move_segments_down(&self) -> bool`
+
+Returns `true` if moving selected segments down is possible.
+
+---
+
+## Run-Level Editing
+
+### `set_game_name<S: PopulateString>(&mut self, name: S)`
+
+Sets the game name.
+
+### `set_category_name<S: PopulateString>(&mut self, name: S)`
+
+Sets the category name.
+
+### `game_name(&self) -> &str`
+
+Returns the current game name.
+
+### `category_name(&self) -> &str`
+
+Returns the current category name.
+
+### `offset(&self) -> TimeSpan`
+
+Returns the run's timer offset.
+
+### `set_offset(&mut self, offset: TimeSpan)`
+
+Sets the timer offset directly.
+
+### `parse_and_set_offset(&mut self, offset: &str, lang: Lang) -> Result<(), ParseError>`
+
+Parses a time string (e.g. `"-0:01:30"`) and sets it as the timer offset. Returns an error if the string cannot be parsed.
+
+### `attempt_count(&self) -> u32`
+
+Returns the current attempt count.
+
+### `set_attempt_count(&mut self, attempts: u32)`
+
+Sets the attempt count directly. This does not affect the attempt history.
+
+### `parse_and_set_attempt_count(&mut self, attempts: &str) -> Result<(), ParseIntError>`
+
+Parses an integer string and sets it as the attempt count.
+
+### `set_game_icon(&mut self, image: Image)`
+
+Sets the game's icon.
+
+### `remove_game_icon(&mut self)`
+
+Removes the game's icon.
+
+---
+
+## Active Segment Editing
+
+The following methods operate on the **active segment** (the most recently selected segment).
+
+### `active_segment(&mut self) -> SegmentRow<&mut Self>`
+
+Returns a `SegmentRow` handle for the active segment, providing access to all segment-level edit operations.
+
+### Active segment icon
+
+```rust
+// Via the C binding equivalents:
+// RunEditor_active_set_icon   — set an icon from raw bytes
+// RunEditor_active_remove_icon — clear the icon
+editor.active_segment().set_icon(image);
+editor.active_segment().remove_icon();
+```
+
+### `active_segment().set_name<S: PopulateString>(&mut self, name: S)`
+
+Sets the name of the active segment.
+
+### `active_segment().parse_and_set_split_time(&mut self, time: &str, lang: Lang) -> Result<(), ParseError>`
+
+Parses a split time string and sets the cumulative split time for the active segment under the currently selected timing method.
+
+### `active_segment().parse_and_set_segment_time(&mut self, time: &str, lang: Lang) -> Result<(), ParseError>`
+
+Parses and sets the individual segment time (duration) for the active segment. The editor automatically recalculates affected split times.
+
+### `active_segment().parse_and_set_best_segment_time(&mut self, time: &str, lang: Lang) -> Result<(), ParseError>`
+
+Parses and sets the best segment time for the active segment.
+
+### `active_segment().parse_and_set_comparison_time(&mut self, comparison: &str, time: &str, lang: Lang) -> Result<(), ParseError>`
+
+Parses and sets the split time for the active segment in a named comparison.
+
+---
+
+## Comparison Management
+
+### `add_comparison<S: PopulateString>(&mut self, comparison: S) -> Result<(), AddComparisonError>`
+
+Adds a new custom comparison. Fails if the name starts with `[Race]` or already exists.
+
+### `import_comparison(&mut self, run: &Run, comparison: &str) -> Result<(), AddComparisonError>`
+
+Imports the Personal Best times from another `Run` as a new named comparison in this run.
+
+### `remove_comparison(&mut self, comparison: &str)`
+
+Removes a custom comparison. Cannot remove `"Personal Best"` or generator-produced comparisons.
+
+### `rename_comparison(&mut self, old: &str, new: &str) -> Result<(), RenameError>`
+
+Renames a comparison. Fails if the new name starts with `[Race]`, already exists, or the old name doesn't exist.
+
+### `move_comparison(&mut self, src_index: usize, dst_index: usize) -> Result<(), ()>`
+
+Reorders a comparison by moving it from `src_index` to `dst_index` in the comparison list.
+
+### `parse_and_generate_goal_comparison(&mut self, time: &str, lang: Lang) -> Result<(), ParseError>`
+
+Parses a goal time and auto-generates a custom comparison with split times balanced against the runner's history. Only the currently selected timing method's times are populated.
+
+### `copy_comparison(&mut self, old_name: &str, new_name: &str) -> Result<(), CopyComparisonError>`
+
+Copies an existing comparison under a new name.
+
+---
+
+## Metadata Editing (via RunEditor)
+
+The editor exposes direct metadata setters without needing to go through `metadata_mut()`:
+
+| Method | Description |
+|--------|-------------|
+| `set_run_id(id: &str)` | Sets the speedrun.com run ID |
+| `set_platform_name(name: &str)` | Sets the platform name |
+| `set_region_name(name: &str)` | Sets the region name |
+| `set_emulator_usage(uses: bool)` | Sets the emulator flag |
+| `set_speedrun_com_variable(name, value)` | Sets a speedrun.com category variable |
+| `remove_speedrun_com_variable(name)` | Removes a speedrun.com variable |
+| `add_custom_variable(name)` | Adds a permanent custom variable |
+| `set_custom_variable(name, value)` | Sets the value of a permanent custom variable |
+| `remove_custom_variable(name)` | Removes a permanent custom variable |
+| `clear_metadata()` | Resets all metadata fields |
+
+---
+
+## History & Cleanup
+
+### `clear_history(&mut self)`
+
+Clears the attempt history and all segment histories, but keeps times.
+
+### `clear_times(&mut self)`
+
+Clears all times, attempt history, segment histories, attempt count, and speedrun.com run ID. Removes all custom comparisons except `"Personal Best"`.
+
+### `clean_sum_of_best(&mut self, lang: Lang) -> SumOfBestCleaner<'_>`
+
+Returns a `SumOfBestCleaner` that interactively identifies segment history entries that cause the Sum of Best to be inaccurately low. Runners can inspect and selectively remove these problematic entries.
+
+---
+
+## Code Example
+
+```rust
+use livesplit_core::{Run, Segment, run::Editor as RunEditor};
+
+let mut run = Run::new();
+run.push_segment(Segment::new("Level 1"));
+
+let mut editor = RunEditor::new(run).unwrap();
+editor.set_game_name("My Game");
+editor.insert_segment_below();
+editor.select_only(1);
+editor.active_segment().set_name("Level 2");
+
+let run = editor.close();
+println!("Segments: {}", run.len());
+```
