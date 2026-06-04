@@ -1,107 +1,72 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "name": "livesplit-core",
-  "theme": "luma",
+  "theme": "mint",
+  "name": "Mintlify Starter Kit",
   "colors": {
-    "primary": "#33c63a",
-    "light": "#d16068",
-    "dark": "#3b4468"
+    "primary": "#16A34A",
+    "light": "#07C983",
+    "dark": "#15803D"
   },
-  "favicon": "https://media.brand.dev/b5a89215-9097-4c35-8e7c-cfa12c69be14.svg",
-  "navbar": {
-    "primary": {
-      "type": "github",
-      "href": "https://github.com/LiveSplit/livesplit-core"
+  "favicon": "/favicon.svg",
+  "navigation": {
+    "pages": [
+      {
+        "group": "Getting Started",
+        "pages": [
+          "index",
+          "quickstart"
+        ]
+      }
+    ],
+    "global": {
+      "anchors": [
+        {
+          "anchor": "Documentation",
+          "href": "https://mintlify.com/docs",
+          "icon": "book-open-cover"
+        },
+        {
+          "anchor": "Blog",
+          "href": "https://mintlify.com/blog",
+          "icon": "newspaper"
+        }
+      ]
     }
+  },
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "Support",
+        "href": "mailto:hi@mintlify.com"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "Dashboard",
+      "href": "https://app.mintlify.com"
+    }
+  },
+  "contextual": {
+    "options": [
+      "copy",
+      "view",
+      "chatgpt",
+      "claude",
+      "perplexity",
+      "mcp",
+      "cursor",
+      "vscode"
+    ]
   },
   "footer": {
     "socials": {
-      "github": "https://github.com/LiveSplit/livesplit-core"
+      "x": "https://x.com/mintlify",
+      "github": "https://github.com/mintlify",
+      "linkedin": "https://linkedin.com/company/mintlify"
     }
-  },
-  "navigation": {
-    "tabs": [
-      {
-        "tab": "Documentation",
-        "groups": [
-          {
-            "group": "Get Started",
-            "pages": [
-              "introduction",
-              "quickstart",
-              "building"
-            ]
-          },
-          {
-            "group": "Core Concepts",
-            "pages": [
-              "concepts/run-and-segments",
-              "concepts/timer",
-              "concepts/comparisons",
-              "concepts/layout-and-components"
-            ]
-          },
-          {
-            "group": "Language Bindings",
-            "pages": [
-              "bindings/overview",
-              "bindings/c-cpp",
-              "bindings/csharp",
-              "bindings/java-kotlin",
-              "bindings/swift",
-              "bindings/javascript-wasm",
-              "bindings/ruby-python"
-            ]
-          },
-          {
-            "group": "Guides",
-            "pages": [
-              "guides/auto-splitting",
-              "guides/rendering",
-              "guides/hotkeys",
-              "guides/parsing-splits"
-            ]
-          }
-        ]
-      },
-      {
-        "tab": "API Reference",
-        "groups": [
-          {
-            "group": "Timer API",
-            "pages": [
-              "api/timer",
-              "api/shared-timer",
-              "api/timer-phase"
-            ]
-          },
-          {
-            "group": "Run API",
-            "pages": [
-              "api/run",
-              "api/segment",
-              "api/run-editor",
-              "api/run-metadata"
-            ]
-          },
-          {
-            "group": "Layout & Components",
-            "pages": [
-              "api/layout",
-              "api/layout-editor",
-              "api/components"
-            ]
-          },
-          {
-            "group": "Analysis & Settings",
-            "pages": [
-              "api/analysis",
-              "api/hotkey-system",
-              "api/auto-splitting-runtime"
-            ]
-          }
-        ]
-      }
-    ]
   }
 }

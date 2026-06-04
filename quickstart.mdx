@@ -1,142 +1,47 @@
 ---
-title: "Quickstart: Build a Speedrun Timer with livesplit-core"
-sidebarTitle: "Quickstart"
-description: "Build a working speedrun timer in Rust using livesplit-core in five steps: create a Run, add segments, start the timer, split, and reset."
+title: "Quickstart"
+description: "Begin with a guide on the fastest path to a successful outcome"
 ---
 
-This quickstart walks you through the native **Rust API**. If you want to use
-livesplit-core from C, Swift, Python, JavaScript, or another language, see the
-[Bindings Overview](/bindings/overview) instead.
+Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
 
-By the end of this guide you will have a fully functional in-memory timer that
-you can start, split, pause, reset, and read time values from.
+A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
+
+## Prerequisites
+
+Before you begin, you must have:
+
+- Requirement one (for example, Node.js 18+, a free account, an API key)
+- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
+
+## Get started
 
 <Steps>
-  <Step title="Add livesplit-core to your Cargo.toml">
-    Open your project's `Cargo.toml` and add livesplit-core as a dependency:
+  <Step title="Install">
+    Describe how to install your product or sign up.
 
-    ```toml Cargo.toml
-    [dependencies]
-    livesplit-core = "0.13.0"
+    ```bash
+    npm install your-package
     ```
-
-    Run `cargo build` once to download and compile the crate and its
-    dependencies.
   </Step>
+  <Step title="Configure">
+    Describe any setup or configuration needed before first use.
 
-  <Step title="Create a Run with segments">
-    A [`Run`](https://docs.rs/livesplit-core/latest/livesplit_core/struct.Run.html)
-    stores everything about a particular game and category: the game name,
-    category name, and an ordered list of
-    [`Segment`](https://docs.rs/livesplit-core/latest/livesplit_core/struct.Segment.html)
-    objects. Each segment represents one split point.
-
-    ```rust
-    use livesplit_core::{Run, Segment, Timer, TimerPhase};
-
-    let mut run = Run::new();
-    run.set_game_name("Super Mario Odyssey");
-    run.set_category_name("Any%");
-    run.push_segment(Segment::new("Cap Kingdom"));
-    run.push_segment(Segment::new("Cascade Kingdom"));
-    run.push_segment(Segment::new("Sand Kingdom"));
+    ```bash
+    your-cli init
     ```
-
-    You can add as many segments as you need. The timer will track your time
-    through each one in order.
   </Step>
+  <Step title="Run it">
+    Show the first thing a user does to see it working.
 
-  <Step title="Create a Timer">
-    Pass the `Run` to
-    [`Timer::new`](https://docs.rs/livesplit-core/latest/livesplit_core/struct.Timer.html#method.new).
-    This will fail with `CreationError::EmptyRun` if the run has no segments,
-    so always add at least one segment first.
-
-    ```rust
-    let mut timer = Timer::new(run).expect("Run must have at least one segment");
+    ```bash
+    your-cli start
     ```
-
-    At this point the timer is in the `TimerPhase::NotRunning` state and is
-    ready to begin an attempt.
-  </Step>
-
-  <Step title="Control the Timer">
-    All mutating operations return a `Result`. In most cases you can safely
-    `.unwrap()` them during development; in production you may want to inspect
-    the error to understand why an operation was rejected (e.g. calling
-    `split()` when the timer is not running).
-
-    ```rust
-    // Start the attempt
-    timer.start().unwrap();
-    assert_eq!(timer.current_phase(), TimerPhase::Running);
-
-    // Record a split
-    timer.split().unwrap();
-
-    // Skip a split if needed
-    timer.skip_split().unwrap();
-
-    // Undo the last split
-    timer.undo_split().unwrap();
-
-    // Pause and resume
-    timer.pause().unwrap();
-    timer.resume().unwrap();
-
-    // Reset (pass true to save the attempt to history)
-    timer.reset(true).unwrap();
-    ```
-
-    | Method | Description |
-    |---|---|
-    | `start()` | Begins a new attempt. |
-    | `split()` | Completes the current segment and advances to the next. |
-    | `skip_split()` | Skips the current segment without recording a time. |
-    | `undo_split()` | Goes back to the previous segment. |
-    | `pause()` | Pauses Real Time accumulation. |
-    | `resume()` | Resumes a paused timer. |
-    | `reset(save)` | Ends the attempt; `true` stores it in history. |
-  </Step>
-
-  <Step title="Read the Current Time">
-    To observe the timer without mutating it, take a
-    [`Snapshot`](https://docs.rs/livesplit-core/latest/livesplit_core/timing/struct.Snapshot.html).
-    The snapshot captures the exact instant it was created and gives you a
-    frozen, consistent view of the timer state — safe to read from any thread.
-
-    ```rust
-    let snapshot = timer.snapshot();
-    let current_time = snapshot.current_time();
-    println!("Real Time: {:?}", current_time.real_time);
-    println!("Game Time: {:?}", current_time.game_time);
-    ```
-
-    `current_time()` returns a
-    [`Time`](https://docs.rs/livesplit-core/latest/livesplit_core/struct.Time.html)
-    with two optional fields:
-
-    - **`real_time`** — wall-clock elapsed time; always tracked.
-    - **`game_time`** — elapsed time as reported by the game; `None` until your
-      auto splitter or application calls `set_game_time`.
   </Step>
 </Steps>
 
 <Tip>
-  Instead of constructing a `Run` manually, you can load an existing LiveSplit
-  `.lss` file (or any of the 15+ other supported formats) using the built-in
-  parsers. See [Parsing Splits Files](/guides/parsing-splits) for details.
+  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+
+  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
 </Tip>
-
----
-
-## Explore Further
-
-<CardGroup cols={2}>
-  <Card title="Timer Concepts" icon="stopwatch" href="/concepts/timer">
-    Deep-dive into timer phases, timing methods, and SharedTimer.
-  </Card>
-  <Card title="Parsing Splits Files" icon="file" href="/guides/parsing-splits">
-    Load .lss and 15+ other split formats from disk or a byte slice.
-  </Card>
-</CardGroup>
